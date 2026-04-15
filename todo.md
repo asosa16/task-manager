@@ -9,3 +9,8 @@
 - [ ] Refactor the interface toward the original black-and-white extension layout with minimal chrome.
 - [ ] Verify the simplified live app and redeploy the reduced version.
 - [ ] Save a new checkpoint and report the updated repository and deployment status.
+- [ ] Decide whether Hero should stay as a responsive web app or move to a cross-platform framework for equal browser-and-phone usability.
+- [ ] Identify the current phone-specific usability issues in layout, touch targets, composer flow, and navigation.
+- [ ] Redesign the interface to work cleanly on phones without weakening the browser experience.
+- [ ] Implement mobile-first responsive behavior and touch-friendly controls while preserving keyboard efficiency on desktop.
+- [ ] Validate the updated experience in browser and phone-sized views before saving a new checkpoint.
