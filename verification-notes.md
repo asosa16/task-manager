@@ -11,3 +11,7 @@ The done archive now matches the simplified language of the home page: plain hea
 ## Preview check: Due
 
 The due screen now works through the keyboard flow from the Today list and lands on a much cleaner intervention screen. The page shows a dark title bar, one main textarea for the smaller next step, one resnooze input, and only the necessary actions. This is much closer to the original Hero philosophy than the previous multi-card treatment.
+
+## Production check
+
+Immediately after pushing commit `aea98ac`, the public Vercel URL was still serving the previous authentication screen and shortcut card layout rather than the new compact shell. This suggests deployment propagation is still in progress or the production alias has not yet updated. A follow-up live check is still required before final delivery.

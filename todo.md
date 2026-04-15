@@ -3,8 +3,9 @@
 - [x] Rework the main information architecture around a central Today list of tasks.
 - [x] Finalize the Supabase integration layer and environment configuration for external deployment.
 - [x] Grant the Vercel GitHub App access to the private hero-web repository from the Vercel import flow.
-- [ ] Enable and verify Supabase email/password authentication for the deployed Hero app.
-- [ ] Confirm Supabase URL configuration for the Vercel production domain.
-- [ ] Verify the deployed login flow against the live Vercel app.
-- [ ] Connect the project to external Supabase and Vercel accounts and complete deployment.
+- [ ] Reassess the original Hero extension's exact UI shell, spacing, and central Today list composition.
+- [ ] Inventory the current web UI elements that feel bloated or unlike the extension and remove them.
+- [ ] Restore the original shortcut model and keyboard-first interaction flow as closely as the web allows.
+- [ ] Refactor the interface toward the original black-and-white extension layout with minimal chrome.
+- [ ] Verify the simplified live app and redeploy the reduced version.
 - [ ] Save a new checkpoint and report the updated repository and deployment status.
