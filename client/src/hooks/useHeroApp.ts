@@ -46,10 +46,17 @@ export interface HeroUser {
 export interface CaptureDraft {
   title: string;
   dueInput: string;
+  captureInput?: string;
   projectId?: string;
   type: HeroItemType;
   url?: string;
   isRecurringDaily?: boolean;
+}
+
+export interface ParsedCaptureInput {
+  title: string;
+  dueAt: string;
+  matchedText: string;
 }
 
 interface HeroSnapshot {
@@ -324,6 +331,10 @@ function humanTime(date: Date) {
   }).format(date);
 }
 
+function collapseWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 export function formatDueLabel(input: string) {
   const date = new Date(input);
   const now = new Date();
@@ -367,6 +378,30 @@ export function formatPreviewFromInput(input: string) {
     .replace("Tomorrow · ", "tomorrow at ")
     .replace("Yesterday · ", "yesterday at ")
     .replace(" · ", " at ");
+}
+
+export function parseCaptureInput(input: string): ParsedCaptureInput | null {
+  const trimmed = collapseWhitespace(input);
+  if (!trimmed) return null;
+
+  const [match] = chrono.parse(trimmed, new Date(), { forwardDate: true });
+  if (!match) return null;
+
+  const title = collapseWhitespace(`${trimmed.slice(0, match.index)} ${trimmed.slice(match.index + match.text.length)}`);
+  if (!title) return null;
+
+  return {
+    title,
+    dueAt: match.start.date().toISOString(),
+    matchedText: match.text,
+  };
+}
+
+export function previewCaptureInput(input: string) {
+  const parsed = parseCaptureInput(input);
+  if (!parsed) return "";
+
+  return `Wake up ${formatPreviewFromInput(parsed.matchedText)}.`;
 }
 
 function mapProjectRow(row: ProjectRow): HeroProject {
@@ -482,6 +517,37 @@ async function loadRemoteSnapshot(userId: string): Promise<HeroSnapshot> {
 
 function nextSelectedIdFromItems(nextItems: HeroItem[]) {
   return nextItems.find((item) => item.status === "upcoming")?.id ?? nextItems[0]?.id ?? null;
+}
+
+function collectDescendantIds(items: HeroItem[], parentId: string) {
+  const descendants = new Set<string>();
+  const queue = [parentId];
+
+  while (queue.length) {
+    const currentId = queue.shift();
+    if (!currentId) continue;
+
+    items.forEach((item) => {
+      if (item.brokenDownFromId === currentId && !descendants.has(item.id)) {
+        descendants.add(item.id);
+        queue.push(item.id);
+      }
+    });
+  }
+
+  return descendants;
+}
+
+function getSubtreeTailDueAt(items: HeroItem[], rootId: string) {
+  const descendantIds = collectDescendantIds(items, rootId);
+  const relevantIds = new Set([rootId, ...Array.from(descendantIds)]);
+
+  return items
+    .filter((item) => relevantIds.has(item.id))
+    .reduce((latest, item) => {
+      const current = new Date(item.dueAt).getTime();
+      return current > latest ? current : latest;
+    }, new Date().getTime());
 }
 
 export function useHeroApp() {
@@ -677,9 +743,27 @@ export function useHeroApp() {
   const saveDraft = useCallback(
     async (draft: CaptureDraft): Promise<MutationResult> => {
       if (!user) return { ok: false, message: "Please sign in first." };
-      const parsed = normalizeParsedDate(draft.dueInput);
-      if (!parsed) return { ok: false, message: "Hero could not interpret that reminder time." };
-      if (!draft.title.trim()) return { ok: false, message: "Give the item a title before saving." };
+
+      let nextTitle = draft.title.trim();
+      let nextDueAt = "";
+
+      if (draft.captureInput?.trim()) {
+        const parsedCapture = parseCaptureInput(draft.captureInput);
+        if (!parsedCapture) {
+          return {
+            ok: false,
+            message: "Type the task together with a wake-up time, like “follow up with Maya tomorrow 9am”.",
+          };
+        }
+        nextTitle = parsedCapture.title;
+        nextDueAt = parsedCapture.dueAt;
+      } else {
+        const parsed = normalizeParsedDate(draft.dueInput);
+        if (!parsed) return { ok: false, message: "Hero could not interpret that reminder time." };
+        nextDueAt = parsed.toISOString();
+      }
+
+      if (!nextTitle) return { ok: false, message: "Give the item a title before saving." };
       if (draft.type === "link" && draft.url && !/^https?:\/\//.test(draft.url)) {
         return { ok: false, message: "Link items should use a full https:// URL." };
       }
@@ -687,16 +771,16 @@ export function useHeroApp() {
       const now = new Date().toISOString();
       const next: HeroItem = {
         id: createRecordId(),
-        title: draft.title.trim(),
+        title: nextTitle,
         type: draft.type,
         status: "upcoming",
-        dueAt: parsed.toISOString(),
+        dueAt: nextDueAt,
         createdAt: now,
         updatedAt: now,
         url: draft.type === "link" ? draft.url?.trim() : undefined,
         projectId: sanitizeProjectId(draft.projectId),
         isRecurringDaily: draft.isRecurringDaily,
-        originalTitle: draft.type === "task" ? draft.title.trim() : undefined,
+        originalTitle: draft.type === "task" ? nextTitle : undefined,
       };
 
 
@@ -891,6 +975,40 @@ export function useHeroApp() {
     [items, updateItem],
   );
 
+  const moveItem = useCallback(
+    async (itemId: string, targetId: string, mode: "after" | "chain"): Promise<MutationResult> => {
+      const source = items.find((item) => item.id === itemId);
+      const target = items.find((item) => item.id === targetId);
+
+      if (!source || !target) {
+        return { ok: false, message: "Hero could not find that task to move." };
+      }
+
+      if (source.id === target.id) {
+        return { ok: false, message: "Choose a different task as the drop target." };
+      }
+
+      const sourceDescendants = collectDescendantIds(items, source.id);
+      if (sourceDescendants.has(target.id)) {
+        return { ok: false, message: "A task cannot be dropped inside its own chain." };
+      }
+
+      const nextDueAt = new Date(getSubtreeTailDueAt(items, target.id) + 60_000).toISOString();
+      const nextParentId = mode === "chain" ? target.id : target.brokenDownFromId;
+      const result = await updateItem(itemId, {
+        dueAt: nextDueAt,
+        brokenDownFromId: nextParentId,
+      });
+
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        message: mode === "chain" ? `Chained under “${target.title}”.` : `Moved after “${target.title}”.`,
+      };
+    },
+    [items, updateItem],
+  );
+
   const signIn = useCallback(async (): Promise<MutationResult> => {
     if (!supabase) {
       const demo = getDemoUser();
@@ -1038,6 +1156,9 @@ export function useHeroApp() {
     breakDownAndResnooze,
     formatPreviewFromInput,
     markDone,
+    moveItem,
+    parseCaptureInput,
+    previewCaptureInput,
     removeItem,
     renameItem,
     rescheduleItem,

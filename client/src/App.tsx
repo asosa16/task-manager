@@ -1,13 +1,14 @@
 /*
 Design note for this file:
-- Routing should reinforce the product ritual: upcoming queue, focused due flow, and calm done archive.
-- Keep the shell light and let the tactile paper styling live in the page components and global tokens.
+- Routing should preserve the original Hero rhythm: Today first, adjacent utility views second.
+- Keep the shell nearly invisible so the page components carry the product character.
 */
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import Analytics from "./pages/Analytics";
 import Done from "./pages/Done";
 import Due from "./pages/Due";
 import Home from "./pages/Home";
@@ -17,6 +18,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/all" component={Home} />
+      <Route path="/analytics" component={Analytics} />
       <Route path="/due/:id" component={Due} />
       <Route path="/done" component={Done} />
       <Route path="/404" component={NotFound} />
