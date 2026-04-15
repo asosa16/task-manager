@@ -1,76 +1,86 @@
-# Hero Web — Supabase and Google OAuth Setup
+# Hero Web: Supabase and Vercel Setup
 
-## What is already in the repo
+This project is now wired for **Google sign-in via Supabase** and **live per-user persistence** using the `projects` and `items` tables defined in `supabase/schema.sql`.
 
-The frontend is prepared for a **static React deployment** with a **Supabase-ready authentication layer** and a proposed database schema in [`supabase/schema.sql`](./supabase/schema.sql).
+The app still works without Supabase keys by falling back to demo mode. If Google auth succeeds but the schema has not been applied yet, the app temporarily uses a user-scoped local fallback and explains what is missing inside the UI.
 
-The current app behavior is intentionally **local-first** until the live backend is connected. This means:
+## 1. Create a Supabase project
 
-- the UI is fully usable now,
-- Google sign-in can be activated once environment variables are added,
-- hosted sync becomes available after the SQL schema is applied.
+Create a new project in [Supabase](https://supabase.com/). Once it is ready, copy the following values from **Project Settings → API**.
 
-## Required environment variables
+| Variable | Source in Supabase |
+| --- | --- |
+| `VITE_SUPABASE_URL` | Project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Publishable key or anon key |
 
-Create a `.env.local` file for local development or add these values in your hosting provider:
+## 2. Apply the Hero schema
 
-```bash
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
-```
+Open the SQL editor in Supabase and run the contents of `supabase/schema.sql`.
 
-## Supabase project setup
+That script creates the following hosted data model.
 
-1. Create a Supabase project.
-2. Open the SQL editor.
-3. Run the SQL in [`supabase/schema.sql`](./supabase/schema.sql).
-4. Confirm that the `projects` and `items` tables exist.
-5. Confirm that Row Level Security is enabled.
+| Object | Purpose |
+| --- | --- |
+| `public.projects` | User-defined task tags such as Personal, Work, or Reading |
+| `public.items` | Tasks and saved links, including due dates, completion state, recurrence flag, and break-down metadata |
+| RLS policies | Per-user row isolation for select, insert, update, and delete |
 
-## Google OAuth setup
+## 3. Enable Google auth
 
-Based on current Supabase documentation, the flow requires both **Supabase** and **Google Cloud** configuration.[1][2]
+In **Authentication → Providers → Google**:
 
-### In Google Cloud
+1. Enable the Google provider.
+2. Create OAuth credentials in Google Cloud.
+3. Copy the Google client ID and secret into Supabase.
+4. Add your app URLs to the allowed redirect list.
 
-1. Create a new OAuth client.
-2. Choose **Web application**.
-3. Add your site origins under **Authorized JavaScript origins**.
-   - local example: `http://localhost:3000`
-   - production example: `https://your-app.vercel.app`
-4. Add the **Supabase callback URL** under **Authorized redirect URIs**.
-   - retrieve this from the Google provider screen inside Supabase
+Use these redirect shapes.
 
-### In Supabase
+| Environment | Redirect URL to allow |
+| --- | --- |
+| Local development | `http://localhost:3000` |
+| Manus preview | The current preview origin, if needed for testing |
+| Vercel production | `https://YOUR-VERCEL-DOMAIN` |
+| Vercel preview deployments | `https://YOUR-VERCEL-PROJECT.vercel.app` |
 
-1. Open **Authentication → Providers → Google**.
-2. Enable the provider.
-3. Paste the Google client ID and client secret.
-4. Set the site URL to your deployed frontend origin.
-5. Add local and production redirect URLs as needed.
+Also add the Supabase callback URL shown in the provider settings to your Google Cloud OAuth configuration.
 
-## Frontend behavior after setup
+## 4. Configure Vercel
 
-Once the variables are present and Google is enabled in Supabase:
+This repo includes a `vercel.json` file so the React single-page app deploys correctly and client-side routes rewrite to `index.html`.
 
-- the **Continue with Google** flow can be used,
-- Supabase sessions will be detected on return to the app,
-- the repo is ready for the next patch that swaps local-first persistence for table-backed sync.
+In Vercel, import the GitHub repository and set these environment variables.
 
-## Recommended next patch
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` | Yes | Supabase project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Yes | Publishable/anon key used by the browser |
 
-The current codebase intentionally keeps state simple and fast. The next backend patch should:
+After the first deployment, copy the final Vercel domain back into Supabase and Google Cloud as an approved redirect origin if it is not already listed.
 
-1. read `projects` and `items` from Supabase after login,
-2. persist create/update/delete mutations to those tables,
-3. keep local state as an optimistic UI layer,
-4. fall back gracefully when the schema is not available.
+## 5. Expected runtime behavior
 
-## Hosting recommendation
+| Condition | App behavior |
+| --- | --- |
+| No Supabase env vars | Demo mode |
+| Supabase auth configured, schema missing | Google auth works, app warns and uses local fallback |
+| Supabase auth + schema configured | Full hosted sync with per-user data |
 
-If you want the fastest supported path, use the platform’s built-in publish flow after saving a checkpoint. If you prefer **Vercel**, the app is compatible with a static frontend deployment, but external hosting may need additional manual configuration for environment variables and auth redirect URLs.
+## 6. Notes for the current implementation
 
-## Sources
+The current app supports the following hosted flows.
 
-[1]: https://supabase.com/docs/guides/auth/quickstarts/react
-[2]: https://supabase.com/docs/guides/auth/social-login/auth-google
+- Google sign-in through Supabase OAuth
+- Create, rename, reschedule, complete, delete, and undo task actions
+- Create user-defined project tags
+- Per-user data isolation via RLS
+- Local fallback if auth is live but tables are not yet available
+
+## 7. Recommended go-live order
+
+1. Apply the Supabase SQL schema.
+2. Enable Google auth in Supabase and Google Cloud.
+3. Add Vercel environment variables.
+4. Deploy from GitHub to Vercel.
+5. Add the final Vercel URL to Supabase and Google Cloud redirect settings.
+6. Test sign-in, task creation, project tagging, done flow, and undo.

@@ -1,8 +1,8 @@
 /*
 Design note for this file:
-- Tactile paper dashboard logic backing a fast, opinionated planner.
-- Preserve the legacy Hero spirit: quick capture, unified queue, calm urgency, and lightweight momentum.
-- Favor terse state transitions and compact domain objects over abstract enterprise modeling.
+- Keep Hero fast and opinionated, but make the state layer honest about storage: demo, local fallback, or live Supabase.
+- Preserve compact domain objects and shortcut-driven actions rather than introducing heavy app architecture.
+- The web rebuild should be ready for Google auth plus per-user hosted sync while remaining usable before external setup is finished.
 */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { nanoid } from "nanoid";
@@ -63,21 +63,51 @@ interface UndoState {
   item: HeroItem;
 }
 
+interface MutationResult {
+  ok: boolean;
+  message: string;
+}
+
+interface ProjectRow {
+  id: string;
+  user_id: string;
+  name: string;
+  tone: ProjectTone;
+  created_at: string;
+}
+
+interface ItemRow {
+  id: string;
+  user_id: string;
+  title: string;
+  type: HeroItemType;
+  status: HeroStatus;
+  due_at: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  url: string | null;
+  project_id: string | null;
+  is_recurring_daily: boolean;
+  broken_down_from_id: string | null;
+  original_title: string | null;
+}
+
 export const legacyShortcutHints = [
   { key: "N", description: "Quick add" },
   { key: "J / K", description: "Move focus" },
   { key: "D", description: "Mark selected done" },
-  { key: "X", description: "Delete selected" },
-  { key: "/", description: "Jump to filters" },
-  { key: "U", description: "Undo last action" },
+  { key: "Delete", description: "Delete selected" },
+  { key: "E", description: "Edit selected item" },
+  { key: "Z / U", description: "Undo last action" },
 ];
 
 export const toneClassMap: Record<ProjectTone, string> = {
-  moss: "bg-[#a6b28a] text-[#233127] border-[#87966c]",
-  slate: "bg-[#7f94a3] text-white border-[#647784]",
-  amber: "bg-[#d6a05b] text-[#352410] border-[#b57c38]",
-  clay: "bg-[#ba7a5e] text-[#fff8f3] border-[#9c6148]",
-  ink: "bg-[#3b4d5c] text-[#f7f1e8] border-[#2d3b47]",
+  moss: "bg-white text-black border-black/20",
+  slate: "bg-[#efefef] text-black border-black/15",
+  amber: "bg-[#dcdcdc] text-black border-black/15",
+  clay: "bg-[#cfcfcf] text-black border-black/15",
+  ink: "bg-black text-white border-black",
 };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -99,10 +129,6 @@ const orderedTones: ProjectTone[] = ["moss", "slate", "amber", "clay", "ink"];
 
 function storageKey(userId: string) {
   return `hero-web::snapshot::${userId}`;
-}
-
-function serialize(snapshot: HeroSnapshot) {
-  window.localStorage.setItem(storageKey("demo-user"), JSON.stringify(snapshot));
 }
 
 function readSerialized(userId: string): HeroSnapshot | null {
@@ -251,6 +277,81 @@ export function formatPreviewFromInput(input: string) {
   return `Hero interprets that as ${formatDueLabel(parsed.toISOString())}.`;
 }
 
+function mapProjectRow(row: ProjectRow): HeroProject {
+  return {
+    id: row.id,
+    name: row.name,
+    tone: row.tone,
+    createdAt: row.created_at,
+  };
+}
+
+function mapItemRow(row: ItemRow): HeroItem {
+  return {
+    id: row.id,
+    title: row.title,
+    type: row.type,
+    status: row.status,
+    dueAt: row.due_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at ?? undefined,
+    url: row.url ?? undefined,
+    projectId: row.project_id ?? undefined,
+    isRecurringDaily: row.is_recurring_daily,
+    brokenDownFromId: row.broken_down_from_id ?? undefined,
+    originalTitle: row.original_title ?? undefined,
+  };
+}
+
+function toProjectInsert(project: HeroProject, userId: string): ProjectRow {
+  return {
+    id: project.id,
+    user_id: userId,
+    name: project.name,
+    tone: project.tone,
+    created_at: project.createdAt,
+  };
+}
+
+function toItemInsert(item: HeroItem, userId: string): ItemRow {
+  return {
+    id: item.id,
+    user_id: userId,
+    title: item.title,
+    type: item.type,
+    status: item.status,
+    due_at: item.dueAt,
+    created_at: item.createdAt,
+    updated_at: item.updatedAt,
+    completed_at: item.completedAt ?? null,
+    url: item.url ?? null,
+    project_id: item.projectId ?? null,
+    is_recurring_daily: item.isRecurringDaily ?? false,
+    broken_down_from_id: item.brokenDownFromId ?? null,
+    original_title: item.originalTitle ?? null,
+  };
+}
+
+function toItemPatch(patch: Partial<HeroItem>) {
+  const mapped: Record<string, unknown> = {};
+
+  if (patch.title !== undefined) mapped.title = patch.title;
+  if (patch.type !== undefined) mapped.type = patch.type;
+  if (patch.status !== undefined) mapped.status = patch.status;
+  if (patch.dueAt !== undefined) mapped.due_at = patch.dueAt;
+  if (patch.createdAt !== undefined) mapped.created_at = patch.createdAt;
+  if (patch.updatedAt !== undefined) mapped.updated_at = patch.updatedAt;
+  if (patch.completedAt !== undefined) mapped.completed_at = patch.completedAt ?? null;
+  if (patch.url !== undefined) mapped.url = patch.url ?? null;
+  if (patch.projectId !== undefined) mapped.project_id = patch.projectId ?? null;
+  if (patch.isRecurringDaily !== undefined) mapped.is_recurring_daily = patch.isRecurringDaily;
+  if (patch.brokenDownFromId !== undefined) mapped.broken_down_from_id = patch.brokenDownFromId ?? null;
+  if (patch.originalTitle !== undefined) mapped.original_title = patch.originalTitle ?? null;
+
+  return mapped;
+}
+
 async function getSupabaseUserFromSession(session: Session | null): Promise<HeroUser | null> {
   if (!session?.user) return null;
   return {
@@ -266,6 +367,27 @@ async function getSupabaseUserFromSession(session: Session | null): Promise<Hero
   };
 }
 
+async function loadRemoteSnapshot(userId: string): Promise<HeroSnapshot> {
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const [projectsResult, itemsResult] = await Promise.all([
+    supabase.from("projects").select("*").eq("user_id", userId).order("created_at", { ascending: true }),
+    supabase.from("items").select("*").eq("user_id", userId).order("due_at", { ascending: true }),
+  ]);
+
+  if (projectsResult.error) throw projectsResult.error;
+  if (itemsResult.error) throw itemsResult.error;
+
+  return {
+    projects: (projectsResult.data as ProjectRow[]).map(mapProjectRow),
+    items: (itemsResult.data as ItemRow[]).map(mapItemRow),
+  };
+}
+
+function nextSelectedIdFromItems(nextItems: HeroItem[]) {
+  return nextItems.find((item) => item.status === "upcoming")?.id ?? nextItems[0]?.id ?? null;
+}
+
 export function useHeroApp() {
   const [user, setUser] = useState<HeroUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -275,49 +397,61 @@ export function useHeroApp() {
   const [activeProjectId, setActiveProjectId] = useState<string>("all");
   const [composerOpen, setComposerOpen] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [remoteReady, setRemoteReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>(
-    supabase ? "Supabase auth is ready. Add project keys and SQL to complete live sync." : "Demo mode is active until Supabase keys are added.",
+    supabase ? "Supabase auth is ready. Connect tables to complete live sync." : "Demo mode is active until Supabase keys are added.",
   );
 
-  const applySnapshot = useCallback((snapshot: HeroSnapshot, userId: string) => {
+  const applySnapshot = useCallback((snapshot: HeroSnapshot, userId: string, persistLocally = false) => {
     setProjects(snapshot.projects);
     setItems(snapshot.items);
-    if (!snapshot.projects.length) {
-      const seeded = createSeedSnapshot();
-      setProjects(seeded.projects);
-      setItems(seeded.items);
-      persistSnapshot(userId, seeded);
-      setSelectedId(seeded.items.find((item) => item.status === "upcoming")?.id ?? null);
-      return;
+    setSelectedId(nextSelectedIdFromItems(snapshot.items));
+    if (persistLocally) {
+      persistSnapshot(userId, snapshot);
     }
-
-    setSelectedId(
-      snapshot.items.find((item) => item.status === "upcoming")?.id ??
-        snapshot.items[0]?.id ??
-        null,
-    );
   }, []);
 
   const loadUserSnapshot = useCallback(
-    (nextUser: HeroUser) => {
-      const stored = readSerialized(nextUser.id) ?? createSeedSnapshot();
-      if (!readSerialized(nextUser.id)) {
-        persistSnapshot(nextUser.id, stored);
+    async (nextUser: HeroUser) => {
+      if (nextUser.mode === "demo") {
+        const stored = readSerialized(nextUser.id) ?? createSeedSnapshot();
+        if (!readSerialized(nextUser.id)) {
+          persistSnapshot(nextUser.id, stored);
+        }
+        applySnapshot(stored, nextUser.id);
+        setRemoteReady(false);
+        setStatusMessage("Demo mode is active until Supabase keys are added.");
+        return;
       }
-      applySnapshot(stored, nextUser.id);
+
+      try {
+        const remoteSnapshot = await loadRemoteSnapshot(nextUser.id);
+        applySnapshot(remoteSnapshot, nextUser.id);
+        setRemoteReady(true);
+        setStatusMessage("Google sign-in and Supabase sync are live.");
+      } catch {
+        const localFallback = readSerialized(nextUser.id) ?? { projects: [], items: [] };
+        applySnapshot(localFallback, nextUser.id, !readSerialized(nextUser.id));
+        setRemoteReady(false);
+        setStatusMessage(
+          "Google sign-in is live, but database tables are not ready yet. Hero is using a private local fallback until the Supabase schema is applied.",
+        );
+      }
     },
     [applySnapshot],
   );
 
   useEffect(() => {
     let active = true;
+    let unsubscribe = () => undefined;
 
     async function bootstrap() {
       if (!supabase) {
         const demo = getDemoUser();
         if (!active) return;
         setUser(demo);
-        loadUserSnapshot(demo);
+        await loadUserSnapshot(demo);
+        if (!active) return;
         setAuthChecked(true);
         return;
       }
@@ -328,43 +462,50 @@ export function useHeroApp() {
 
       if (nextUser) {
         setUser(nextUser);
-        loadUserSnapshot(nextUser);
-        setStatusMessage("Supabase auth is live. Data is running in local-first mode until your tables are connected.");
+        await loadUserSnapshot(nextUser);
       }
+      if (!active) return;
       setAuthChecked(true);
 
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const subscription = supabase.auth.onAuthStateChange(async (_event, session) => {
         const changedUser = await getSupabaseUserFromSession(session);
+        if (!active) return;
+
         if (!changedUser) {
           setUser(null);
           setProjects([]);
           setItems([]);
+          setSelectedId(null);
+          setRemoteReady(false);
+          setStatusMessage("Signed out.");
           return;
         }
 
         setUser(changedUser);
-        loadUserSnapshot(changedUser);
-        setStatusMessage("Supabase auth is live. Data is running in local-first mode until your tables are connected.");
+        await loadUserSnapshot(changedUser);
       });
 
-      return () => subscription.unsubscribe();
+      unsubscribe = () => {
+        subscription.data.subscription.unsubscribe();
+      };
     }
 
-    const cleanupPromise = bootstrap();
+    void bootstrap();
+
     return () => {
       active = false;
-      void cleanupPromise;
+      unsubscribe();
     };
   }, [loadUserSnapshot]);
 
-  const persist = useCallback(
+  const commitLocalSnapshot = useCallback(
     (nextProjects: HeroProject[], nextItems: HeroItem[]) => {
-      if (!user) return;
-      persistSnapshot(user.id, { projects: nextProjects, items: nextItems });
       setProjects(nextProjects);
       setItems(nextItems);
+      setSelectedId(nextSelectedIdFromItems(nextItems));
+      if (user) {
+        persistSnapshot(user.id, { projects: nextProjects, items: nextItems });
+      }
     },
     [user],
   );
@@ -390,7 +531,7 @@ export function useHeroApp() {
     [selectedId, upcomingItems],
   );
 
-  const selectedItem = upcomingItems[selectedIndex] ?? null;
+  const selectedItem = upcomingItems[selectedIndex] ?? items.find((item) => item.id === selectedId) ?? null;
   const overdueCount = upcomingItems.filter((item) => new Date(item.dueAt).getTime() < Date.now()).length;
   const doneTodayCount = doneItems.filter((item) => {
     const value = item.completedAt ? new Date(item.completedAt) : null;
@@ -404,22 +545,38 @@ export function useHeroApp() {
   );
 
   const addProject = useCallback(
-    (name: string) => {
-      if (!user || !name.trim()) return;
+    async (name: string): Promise<MutationResult> => {
+      if (!user || !name.trim()) return { ok: false, message: "Give the project a name first." };
+
       const nextProject: HeroProject = {
         id: nanoid(),
         name: name.trim(),
         tone: orderedTones[projects.length % orderedTones.length],
         createdAt: new Date().toISOString(),
       };
-      persist([...projects, nextProject], items);
-      setActiveProjectId(nextProject.id);
+
+      if (user.mode === "demo" || !remoteReady || !supabase) {
+        const nextProjects = [...projects, nextProject];
+        commitLocalSnapshot(nextProjects, items);
+        setActiveProjectId(nextProject.id);
+        return { ok: true, message: `Project “${nextProject.name}” added.` };
+      }
+
+      const result = await supabase.from("projects").insert(toProjectInsert(nextProject, user.id)).select().single();
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
+
+      const inserted = mapProjectRow(result.data as ProjectRow);
+      setProjects((current) => [...current, inserted]);
+      setActiveProjectId(inserted.id);
+      return { ok: true, message: `Project “${inserted.name}” added.` };
     },
-    [items, persist, projects, user],
+    [commitLocalSnapshot, items, projects, remoteReady, user],
   );
 
   const saveDraft = useCallback(
-    (draft: CaptureDraft) => {
+    async (draft: CaptureDraft): Promise<MutationResult> => {
       if (!user) return { ok: false, message: "Please sign in first." };
       const parsed = normalizeParsedDate(draft.dueInput);
       if (!parsed) return { ok: false, message: "Hero could not interpret that reminder time." };
@@ -443,115 +600,203 @@ export function useHeroApp() {
         originalTitle: draft.type === "task" ? draft.title.trim() : undefined,
       };
 
-      const nextItems = [...items, next];
-      persist(projects, nextItems);
-      setSelectedId(next.id);
+      if (user.mode === "demo" || !remoteReady || !supabase) {
+        const nextItems = [...items, next];
+        commitLocalSnapshot(projects, nextItems);
+        setSelectedId(next.id);
+        setComposerOpen(false);
+        return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
+      }
+
+      const result = await supabase.from("items").insert(toItemInsert(next, user.id)).select().single();
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
+
+      const inserted = mapItemRow(result.data as ItemRow);
+      setItems((current) => [...current, inserted]);
+      setSelectedId(inserted.id);
       setComposerOpen(false);
-      return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
+      return { ok: true, message: `Saved for ${formatDueLabel(inserted.dueAt)}.` };
     },
-    [items, persist, projects, user],
+    [commitLocalSnapshot, items, projects, remoteReady, user],
   );
 
   const updateItem = useCallback(
-    (itemId: string, patch: Partial<HeroItem>) => {
-      const nextItems = items.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              ...patch,
-              updatedAt: new Date().toISOString(),
-            }
-          : item,
-      );
-      persist(projects, nextItems);
+    async (itemId: string, patch: Partial<HeroItem>): Promise<MutationResult> => {
+      const nextUpdatedAt = new Date().toISOString();
+      if (user?.mode === "demo" || !remoteReady || !supabase) {
+        const nextItems = items.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                ...patch,
+                updatedAt: patch.updatedAt ?? nextUpdatedAt,
+              }
+            : item,
+        );
+        commitLocalSnapshot(projects, nextItems);
+        return { ok: true, message: "Item updated." };
+      }
+
+      if (!user) return { ok: false, message: "Please sign in first." };
+      const result = await supabase
+        .from("items")
+        .update(toItemPatch({ ...patch, updatedAt: patch.updatedAt ?? nextUpdatedAt }))
+        .eq("id", itemId)
+        .eq("user_id", user.id)
+        .select()
+        .single();
+
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
+
+      const updated = mapItemRow(result.data as ItemRow);
+      setItems((current) => current.map((item) => (item.id === itemId ? updated : item)));
+      return { ok: true, message: "Item updated." };
     },
-    [items, persist, projects],
+    [commitLocalSnapshot, items, projects, remoteReady, user],
   );
 
   const renameItem = useCallback(
-    (itemId: string, title: string) => {
-      if (!title.trim()) return;
-      updateItem(itemId, { title: title.trim() });
+    async (itemId: string, title: string): Promise<MutationResult> => {
+      if (!title.trim()) return { ok: false, message: "Give the item a title first." };
+      return updateItem(itemId, { title: title.trim() });
     },
     [updateItem],
   );
 
   const rescheduleItem = useCallback(
-    (itemId: string, dueInput: string) => {
+    async (itemId: string, dueInput: string): Promise<MutationResult> => {
       const parsed = normalizeParsedDate(dueInput);
       if (!parsed) return { ok: false, message: "Could not interpret the new reminder time." };
-      updateItem(itemId, { dueAt: parsed.toISOString() });
+      const result = await updateItem(itemId, { dueAt: parsed.toISOString() });
+      if (!result.ok) return result;
       return { ok: true, message: `Rescheduled to ${formatDueLabel(parsed.toISOString())}.` };
     },
     [updateItem],
   );
 
   const markDone = useCallback(
-    (itemId: string) => {
+    async (itemId: string): Promise<MutationResult> => {
       const target = items.find((item) => item.id === itemId);
-      if (!target) return;
+      if (!target) return { ok: false, message: "Item not found." };
       const completedAt = new Date().toISOString();
-      const nextItem = { ...target, status: "done" as const, completedAt, updatedAt: completedAt };
+      const result = await updateItem(itemId, {
+        status: "done",
+        completedAt,
+        updatedAt: completedAt,
+      });
+      if (!result.ok) return result;
       setUndoState({ kind: "done", item: target });
-      persist(
-        projects,
-        items.map((item) => (item.id === itemId ? nextItem : item)),
-      );
       const nextUpcoming = upcomingItems.filter((item) => item.id !== itemId);
       setSelectedId(nextUpcoming[0]?.id ?? null);
+      return { ok: true, message: "Item marked done." };
     },
-    [items, persist, projects, upcomingItems],
+    [items, upcomingItems, updateItem],
   );
 
   const removeItem = useCallback(
-    (itemId: string) => {
+    async (itemId: string): Promise<MutationResult> => {
       const target = items.find((item) => item.id === itemId);
-      if (!target) return;
+      if (!target) return { ok: false, message: "Item not found." };
+
+      if (user?.mode === "demo" || !remoteReady || !supabase) {
+        const nextItems = items.filter((item) => item.id !== itemId);
+        commitLocalSnapshot(projects, nextItems);
+        setUndoState({ kind: "delete", item: target });
+        return { ok: true, message: "Item deleted." };
+      }
+
+      if (!user) return { ok: false, message: "Please sign in first." };
+      const result = await supabase.from("items").delete().eq("id", itemId).eq("user_id", user.id);
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
+
+      setItems((current) => current.filter((item) => item.id !== itemId));
       setUndoState({ kind: "delete", item: target });
-      const nextItems = items.filter((item) => item.id !== itemId);
-      persist(projects, nextItems);
       const nextUpcoming = upcomingItems.filter((item) => item.id !== itemId);
       setSelectedId(nextUpcoming[0]?.id ?? null);
+      return { ok: true, message: "Item deleted." };
     },
-    [items, persist, projects, upcomingItems],
+    [commitLocalSnapshot, items, projects, remoteReady, upcomingItems, user],
   );
 
-  const undoLastAction = useCallback(() => {
-    if (!undoState) return;
-    const nextItems = [...items, undoState.item].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    );
-    persist(projects, nextItems);
-    setSelectedId(undoState.item.id);
+  const undoLastAction = useCallback(async (): Promise<MutationResult> => {
+    if (!undoState) return { ok: false, message: "Nothing to undo." };
+
+    if (undoState.kind === "delete") {
+      const restored = undoState.item;
+      if (user?.mode === "demo" || !remoteReady || !supabase) {
+        const nextItems = [...items, restored].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+        commitLocalSnapshot(projects, nextItems);
+        setSelectedId(restored.id);
+        setUndoState(null);
+        return { ok: true, message: "Deletion undone." };
+      }
+
+      if (!user) return { ok: false, message: "Please sign in first." };
+      const result = await supabase.from("items").insert(toItemInsert(restored, user.id)).select().single();
+      if (result.error) return { ok: false, message: result.error.message };
+
+      const inserted = mapItemRow(result.data as ItemRow);
+      setItems((current) => [...current, inserted].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+      setSelectedId(inserted.id);
+      setUndoState(null);
+      return { ok: true, message: "Deletion undone." };
+    }
+
+    const restored = undoState.item;
+    const result = await updateItem(restored.id, {
+      title: restored.title,
+      type: restored.type,
+      status: restored.status,
+      dueAt: restored.dueAt,
+      createdAt: restored.createdAt,
+      updatedAt: restored.updatedAt,
+      completedAt: restored.completedAt,
+      url: restored.url,
+      projectId: restored.projectId,
+      isRecurringDaily: restored.isRecurringDaily,
+      brokenDownFromId: restored.brokenDownFromId,
+      originalTitle: restored.originalTitle,
+    });
+    if (!result.ok) return result;
+    setSelectedId(restored.id);
     setUndoState(null);
-  }, [items, persist, projects, undoState]);
+    return { ok: true, message: "Completion undone." };
+  }, [commitLocalSnapshot, items, projects, remoteReady, undoState, updateItem, user]);
 
   const breakDownAndResnooze = useCallback(
-    (itemId: string, smallerStep: string, dueInput: string) => {
+    async (itemId: string, smallerStep: string, dueInput: string): Promise<MutationResult> => {
       const target = items.find((item) => item.id === itemId);
       const parsed = normalizeParsedDate(dueInput);
       if (!target || !parsed) {
         return { ok: false, message: "Hero needs both a smaller step and a valid reminder time." };
       }
       const nextTitle = smallerStep.trim() || target.title;
-      updateItem(itemId, {
+      const result = await updateItem(itemId, {
         title: nextTitle,
         dueAt: parsed.toISOString(),
         brokenDownFromId: target.brokenDownFromId || target.id,
         originalTitle: target.originalTitle || target.title,
       });
+      if (!result.ok) return result;
       return { ok: true, message: `Smaller next step scheduled for ${formatDueLabel(parsed.toISOString())}.` };
     },
     [items, updateItem],
   );
 
-  const signIn = useCallback(async () => {
+  const signIn = useCallback(async (): Promise<MutationResult> => {
     if (!supabase) {
       const demo = getDemoUser();
       setUser(demo);
-      loadUserSnapshot(demo);
+      await loadUserSnapshot(demo);
       setAuthChecked(true);
-      setStatusMessage("Demo mode is active. Add Supabase keys to enable Google sign-in.");
       return { ok: true, message: "Signed into demo mode." };
     }
 
@@ -574,6 +819,8 @@ export function useHeroApp() {
       setUser(null);
       setProjects([]);
       setItems([]);
+      setSelectedId(null);
+      setRemoteReady(false);
       return;
     }
     await supabase.auth.signOut();
@@ -611,6 +858,7 @@ export function useHeroApp() {
     overdueCount,
     projectOptions,
     projects,
+    remoteReady,
     selectedId,
     selectedIndex,
     selectedItem,

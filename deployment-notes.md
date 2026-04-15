@@ -1,0 +1,17 @@
+## Supabase dashboard progress
+
+The user is logged into Supabase. The organization visible in the dashboard is **Hero OG**, and it currently contains one project card also labeled **Hero OG** in region **us-west-2** on the **NANO** plan. The next step is to open that project, apply the SQL schema, and retrieve the project URL plus publishable key for Vercel environment configuration.
+The Supabase project has been opened successfully. The visible project is **Hero OG** and the browser URL confirms the project reference `rpwmrccvzcikbtwbqchu`. The overview page also shows the hosted API domain in the form `https://rpwmrccvzcikbtwbqchu.supabase.co`. Next steps are to open the SQL Editor, apply the Hero schema, and then retrieve the publishable key for Vercel environment configuration.
+The Hero SQL schema has been applied successfully in the Supabase SQL Editor. The saved query is titled **Per-User Projects and Items with RLS**, and the results panel reports **Success. No rows returned**, which confirms the tables and policies were created without execution errors.
+On the Supabase dashboard, the visible API endpoint is `https://rpwmrccvzcikbtwbqchu.supabase.co`. The current page is the Data API integration view and does **not** expose a publishable key in the visible content, so an additional navigation step is needed to reach the project API key settings.
+The Supabase Connect panel exposes the frontend environment values needed by the Hero app:
+
+- `NEXT_PUBLIC_SUPABASE_URL=https://rpwmrccvzcikbtwbqchu.supabase.co`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_LaIL-CRgrPD4vtYkHlqsTA_clYwD47i`
+
+These values should also be mirrored for the existing app variable names used in the repository when configuring Vercel.
+On Vercel's New Project page, the workspace is signed in and the selected Git namespace is **Hero-Github**, but searching for `hero-web` returns **No Results Found**. The UI explicitly indicates that Vercel needs access to the repository and shows a **Configure GitHub App** action. This means the next deployment step is blocked until the Vercel GitHub App is granted permission to the private `asosa16/hero-web` repository.
+After authorizing GitHub from the Vercel flow, the `asosa16` namespace is available on Vercel and the private repository `hero-web` now appears in the import list alongside `hero-facturas` and `vercel-guide`. The deployment blocker caused by missing repository access is resolved, and the next step is to import `hero-web`.
+A direct click attempt on the Vercel repository list unexpectedly redirected back to GitHub's `Installing Vercel` target-selection page, showing `Configure asosa16` and `Configure Hero-Github`. To avoid re-entering the installation flow manually, the safer next step is to return to `vercel.com/new` and trigger the `hero-web` import via DOM-targeted selection instead of generic viewport clicking.
+A DOM-based activation attempt on Vercel's New Project page found `hero-web` text within the page, but the first generic clickable match was the broader page container instead of the repository's specific import control. The next step is to inspect the current page state and then target the dedicated `Import` button associated with the `hero-web` row more precisely.
+The `hero-web` repository import opened successfully in Vercel. The project is detected as **asosa16/hero-web** on branch `main`, the preset is **Vite**, the root directory is `./`, and the deployment form is now waiting for environment variables before running the first deploy.
