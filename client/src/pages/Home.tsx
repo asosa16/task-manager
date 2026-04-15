@@ -4,7 +4,7 @@ Design note for this file:
 - The list is the product. Remove dashboard framing, large marketing copy, and secondary panels that compete with the Today table.
 - Keep web-specific needs thin: compact auth, mobile-safe layout, and project tags without visual noise.
 */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 import {
@@ -40,9 +40,12 @@ export default function Home() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const dueInputRef = useRef<HTMLInputElement>(null);
+  const composerDueInputRef = useRef<HTMLInputElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  const projectSelectRef = useRef<HTMLSelectElement>(null);
 
   const [draftTitle, setDraftTitle] = useState("");
-  const [draftDueInput, setDraftDueInput] = useState("today 5pm");
+  const [draftDueInput, setDraftDueInput] = useState("");
   const [draftProjectId, setDraftProjectId] = useState("");
   const [draftType, setDraftType] = useState<"task" | "link">("task");
   const [draftUrl, setDraftUrl] = useState("");
@@ -69,20 +72,67 @@ export default function Home() {
   const todayItems = useMemo(() => activeItems.filter((item) => isTodayOrOverdue(item.dueAt)), [activeItems]);
   const laterItems = useMemo(() => activeItems.filter((item) => !isTodayOrOverdue(item.dueAt)), [activeItems]);
   const visibleItems = todayItems.length ? [...todayItems, ...laterItems.slice(0, 8)] : activeItems;
+  const reminderPreview = formatPreviewFromInput(draftDueInput);
 
   useEffect(() => {
     setRenameValue(hero.selectedItem?.title ?? "");
     setRescheduleValue("");
   }, [hero.selectedItem]);
 
+  function openComposer() {
+    setDraftProjectId((current) => {
+      if (current) return current;
+      return hero.activeProjectId !== "all" ? hero.activeProjectId : "";
+    });
+    hero.setComposerOpen(true);
+    window.requestAnimationFrame(() => titleInputRef.current?.focus());
+  }
+
+  function closeComposer() {
+    hero.setComposerOpen(false);
+  }
+
+  function handleComposerFieldKeyDown(
+    event: ReactKeyboardEvent<HTMLInputElement | HTMLSelectElement>,
+    field: "title" | "due" | "url" | "project",
+  ) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeComposer();
+      return;
+    }
+
+    if (field === "title" && event.key === "Enter" && event.shiftKey) {
+      event.preventDefault();
+      void handleSaveDraft();
+      return;
+    }
+
+    if (field === "title" && event.key === "Enter") {
+      event.preventDefault();
+      composerDueInputRef.current?.focus();
+      return;
+    }
+
+    if ((field === "due" || field === "url" || field === "project") && event.key === "Enter") {
+      event.preventDefault();
+      void handleSaveDraft();
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const isField = isEditingField(event.target);
 
+      if (event.key === "Escape" && hero.composerOpen) {
+        event.preventDefault();
+        closeComposer();
+        return;
+      }
+
       if ((event.key === "n" || event.key === "N") && !isField) {
         event.preventDefault();
-        hero.setComposerOpen(true);
-        window.requestAnimationFrame(() => titleInputRef.current?.focus());
+        openComposer();
         return;
       }
 
@@ -174,7 +224,7 @@ export default function Home() {
 
     toast.success(result.message);
     setDraftTitle("");
-    setDraftDueInput("today 5pm");
+    setDraftDueInput("");
     setDraftProjectId("");
     setDraftType("task");
     setDraftUrl("");
@@ -325,8 +375,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => {
-                  hero.setComposerOpen(true);
-                  window.requestAnimationFrame(() => titleInputRef.current?.focus());
+                  openComposer();
                 }}
                 className="border border-black bg-black px-2 py-1 text-white"
               >
@@ -374,25 +423,20 @@ export default function Home() {
               </div>
 
               {hero.composerOpen ? (
-                <div className="border-b border-black bg-black px-4 py-4 text-white">
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
-                    <div className="space-y-3">
-                      <input
-                        ref={titleInputRef}
-                        value={draftTitle}
-                        onChange={(event) => setDraftTitle(event.target.value)}
-                        placeholder="What needs doing?"
-                        className="w-full border-0 border-l border-white bg-black px-3 py-2 text-sm outline-none placeholder:text-white/45"
-                      />
-                      {draftType === "link" ? (
-                        <input
-                          value={draftUrl}
-                          onChange={(event) => setDraftUrl(event.target.value)}
-                          placeholder="https://..."
-                          className="w-full border-0 border-l border-white bg-black px-3 py-2 text-sm outline-none placeholder:text-white/45"
-                        />
-                      ) : null}
-                      <div className="flex flex-wrap gap-2 text-xs">
+                <form
+                  className="border-b border-black bg-black px-4 py-4 text-white"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleSaveDraft();
+                  }}
+                >
+                  <div className="max-w-[420px]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-[13px] leading-5 text-white/70">
+                        <div className="font-semibold text-white/80">Task</div>
+                        <div className="text-[11px]">Tab to wake-up time. Shift+Enter also saves.</div>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px]">
                         <button
                           type="button"
                           onClick={() => setDraftType("task")}
@@ -407,27 +451,63 @@ export default function Home() {
                         >
                           Link
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setDraftRecurring((value) => !value)}
-                          className={`border px-2 py-1 ${draftRecurring ? "border-white bg-white text-black" : "border-white/50 bg-black text-white"}`}
-                        >
-                          Recurring
-                        </button>
                       </div>
                     </div>
 
-                    <div className="space-y-3 text-xs">
+                    <input
+                      ref={titleInputRef}
+                      value={draftTitle}
+                      onChange={(event) => setDraftTitle(event.target.value)}
+                      onKeyDown={(event) => handleComposerFieldKeyDown(event, "title")}
+                      placeholder="Example: Cancel spotify subscription"
+                      className="mt-2 w-full border-0 border-l border-white bg-black px-3 py-2 text-sm outline-none placeholder:text-white/45"
+                    />
+
+                    <div className="mt-4 text-[13px] font-semibold text-white/80">Remind me</div>
+                    <input
+                      ref={composerDueInputRef}
+                      value={draftDueInput}
+                      onChange={(event) => setDraftDueInput(event.target.value)}
+                      onKeyDown={(event) => handleComposerFieldKeyDown(event, "due")}
+                      placeholder="Try: 8 am, in 2 hours, aug 7, today 12:30pm"
+                      className="mt-2 w-full border-0 border-l border-white bg-black px-3 py-2 text-sm outline-none placeholder:text-white/45"
+                    />
+                    <div className="mt-2 min-h-9 w-full bg-[#363636] px-3 py-2 text-[12px] text-white">{reminderPreview}</div>
+
+                    {draftType === "link" ? (
                       <input
-                        value={draftDueInput}
-                        onChange={(event) => setDraftDueInput(event.target.value)}
-                        placeholder="today 5pm"
-                        className="w-full border-0 border-l border-white bg-black px-3 py-2 text-sm outline-none placeholder:text-white/45"
+                        ref={urlInputRef}
+                        value={draftUrl}
+                        onChange={(event) => setDraftUrl(event.target.value)}
+                        onKeyDown={(event) => handleComposerFieldKeyDown(event, "url")}
+                        placeholder="https://..."
+                        className="mt-3 w-full border-0 border-l border-white bg-black px-3 py-2 text-sm outline-none placeholder:text-white/45"
                       />
+                    ) : null}
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                      <div>
+                        press <kbd className="border border-white/50 bg-[#5a5a5a] px-1.5 py-[1px] font-mono text-[10px] text-white">enter</kbd> to submit
+                      </div>
+                      <label className="flex items-center gap-2 text-white/75">
+                        <input
+                          checked={draftRecurring}
+                          onChange={(event) => setDraftRecurring(event.target.checked)}
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-white"
+                        />
+                        Everyday
+                      </label>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="text-white/75">Project</span>
                       <select
+                        ref={projectSelectRef}
                         value={draftProjectId}
                         onChange={(event) => setDraftProjectId(event.target.value)}
-                        className="w-full border border-white/50 bg-black px-2 py-2 text-sm text-white outline-none"
+                        onKeyDown={(event) => handleComposerFieldKeyDown(event, "project")}
+                        className="min-w-[160px] border border-white/50 bg-black px-2 py-1.5 text-[12px] text-white outline-none"
                       >
                         <option value="">No project</option>
                         {hero.projects.map((project) => (
@@ -436,18 +516,15 @@ export default function Home() {
                           </option>
                         ))}
                       </select>
-                      <div className="text-[11px] text-white/65">{formatPreviewFromInput(draftDueInput)}</div>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => void handleSaveDraft()} className="border border-white bg-white px-3 py-1.5 text-black">
-                          Save
-                        </button>
-                        <button type="button" onClick={() => hero.setComposerOpen(false)} className="border border-white/50 bg-black px-3 py-1.5 text-white">
-                          Cancel
-                        </button>
-                      </div>
+                      <button type="button" onClick={() => closeComposer()} className="border border-white/50 bg-black px-2 py-1.5 text-white">
+                        Cancel
+                      </button>
+                      <button type="submit" className="hidden">
+                        Save task
+                      </button>
                     </div>
                   </div>
-                </div>
+                </form>
               ) : null}
 
               <div className="overflow-x-auto px-4 py-4">

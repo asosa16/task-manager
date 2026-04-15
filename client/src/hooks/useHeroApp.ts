@@ -126,6 +126,76 @@ const supabase =
     : null;
 
 const orderedTones: ProjectTone[] = ["moss", "slate", "amber", "clay", "ink"];
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value?: string | null): value is string {
+  return Boolean(value && uuidPattern.test(value));
+}
+
+function createRecordId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return nanoid();
+}
+
+function sanitizeProjectId(projectId?: string | null) {
+  return isUuid(projectId) ? projectId : undefined;
+}
+
+function normalizeSnapshotIds(snapshot: HeroSnapshot): HeroSnapshot {
+  const projectIdMap = new Map(
+    snapshot.projects.map((project) => [project.id, isUuid(project.id) ? project.id : createRecordId()] as const),
+  );
+  const itemIdMap = new Map(
+    snapshot.items.map((item) => [item.id, isUuid(item.id) ? item.id : createRecordId()] as const),
+  );
+
+  let changed = false;
+
+  const projects = snapshot.projects.map((project) => {
+    const nextId = projectIdMap.get(project.id) ?? project.id;
+    if (nextId !== project.id) changed = true;
+    return nextId === project.id ? project : { ...project, id: nextId };
+  });
+
+  const items = snapshot.items.map((item) => {
+    const nextId = itemIdMap.get(item.id) ?? item.id;
+    const nextProjectId = item.projectId
+      ? projectIdMap.get(item.projectId) ?? sanitizeProjectId(item.projectId)
+      : undefined;
+    const nextBrokenDownFromId = item.brokenDownFromId
+      ? itemIdMap.get(item.brokenDownFromId) ?? (isUuid(item.brokenDownFromId) ? item.brokenDownFromId : undefined)
+      : undefined;
+
+    if (nextId !== item.id || nextProjectId !== item.projectId || nextBrokenDownFromId !== item.brokenDownFromId) {
+      changed = true;
+    }
+
+    return {
+      ...item,
+      id: nextId,
+      projectId: nextProjectId,
+      brokenDownFromId: nextBrokenDownFromId,
+    };
+  });
+
+  return changed ? { projects, items } : snapshot;
+}
+
+function ensureRemoteSafeProject(project: HeroProject): HeroProject {
+  return isUuid(project.id) ? project : { ...project, id: createRecordId() };
+}
+
+function ensureRemoteSafeItem(item: HeroItem): HeroItem {
+  return {
+    ...item,
+    id: isUuid(item.id) ? item.id : createRecordId(),
+    projectId: sanitizeProjectId(item.projectId),
+    brokenDownFromId: isUuid(item.brokenDownFromId) ? item.brokenDownFromId : undefined,
+  };
+}
 
 function storageKey(userId: string) {
   return `hero-web::snapshot::${userId}`;
@@ -135,7 +205,7 @@ function readSerialized(userId: string): HeroSnapshot | null {
   const raw = window.localStorage.getItem(storageKey(userId));
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as HeroSnapshot;
+    return normalizeSnapshotIds(JSON.parse(raw) as HeroSnapshot);
   } catch {
     return null;
   }
@@ -148,9 +218,9 @@ function persistSnapshot(userId: string, snapshot: HeroSnapshot) {
 function createSeedProjects(): HeroProject[] {
   const now = new Date().toISOString();
   return [
-    { id: "project-personal", name: "Personal", tone: "moss", createdAt: now },
-    { id: "project-work", name: "Work", tone: "slate", createdAt: now },
-    { id: "project-reading", name: "Reading", tone: "amber", createdAt: now },
+    { id: createRecordId(), name: "Personal", tone: "moss", createdAt: now },
+    { id: createRecordId(), name: "Work", tone: "slate", createdAt: now },
+    { id: createRecordId(), name: "Reading", tone: "amber", createdAt: now },
   ];
 }
 
@@ -161,7 +231,7 @@ function offset(hours: number) {
 function createSeedItems(projects: HeroProject[]): HeroItem[] {
   return [
     {
-      id: nanoid(),
+      id: createRecordId(),
       title: "Write the launch plan for Hero Web",
       type: "task",
       status: "upcoming",
@@ -172,7 +242,7 @@ function createSeedItems(projects: HeroProject[]): HeroItem[] {
       originalTitle: "Write the launch plan for Hero Web",
     },
     {
-      id: nanoid(),
+      id: createRecordId(),
       title: "Renew passport before summer travel",
       type: "task",
       status: "upcoming",
@@ -183,7 +253,7 @@ function createSeedItems(projects: HeroProject[]): HeroItem[] {
       originalTitle: "Renew passport before summer travel",
     },
     {
-      id: nanoid(),
+      id: createRecordId(),
       title: "Read that essay on quiet software tools",
       type: "link",
       url: "https://example.com/quiet-tools",
@@ -194,7 +264,7 @@ function createSeedItems(projects: HeroProject[]): HeroItem[] {
       projectId: projects[2]?.id,
     },
     {
-      id: nanoid(),
+      id: createRecordId(),
       title: "Send proposal revision to Martina",
       type: "task",
       status: "done",
@@ -273,8 +343,13 @@ export function getDueMood(input: string) {
 
 export function formatPreviewFromInput(input: string) {
   const parsed = normalizeParsedDate(input);
-  if (!parsed) return "Type a natural-language reminder like tomorrow 9am or in 3 days.";
-  return `Hero interprets that as ${formatDueLabel(parsed.toISOString())}.`;
+  if (!parsed) return "";
+
+  return formatDueLabel(parsed.toISOString())
+    .replace("Today · ", "today at ")
+    .replace("Tomorrow · ", "tomorrow at ")
+    .replace("Yesterday · ", "yesterday at ")
+    .replace(" · ", " at ");
 }
 
 function mapProjectRow(row: ProjectRow): HeroProject {
@@ -305,31 +380,35 @@ function mapItemRow(row: ItemRow): HeroItem {
 }
 
 function toProjectInsert(project: HeroProject, userId: string): ProjectRow {
+  const safeProject = ensureRemoteSafeProject(project);
+
   return {
-    id: project.id,
+    id: safeProject.id,
     user_id: userId,
-    name: project.name,
-    tone: project.tone,
-    created_at: project.createdAt,
+    name: safeProject.name,
+    tone: safeProject.tone,
+    created_at: safeProject.createdAt,
   };
 }
 
 function toItemInsert(item: HeroItem, userId: string): ItemRow {
+  const safeItem = ensureRemoteSafeItem(item);
+
   return {
-    id: item.id,
+    id: safeItem.id,
     user_id: userId,
-    title: item.title,
-    type: item.type,
-    status: item.status,
-    due_at: item.dueAt,
-    created_at: item.createdAt,
-    updated_at: item.updatedAt,
-    completed_at: item.completedAt ?? null,
-    url: item.url ?? null,
-    project_id: item.projectId ?? null,
-    is_recurring_daily: item.isRecurringDaily ?? false,
-    broken_down_from_id: item.brokenDownFromId ?? null,
-    original_title: item.originalTitle ?? null,
+    title: safeItem.title,
+    type: safeItem.type,
+    status: safeItem.status,
+    due_at: safeItem.dueAt,
+    created_at: safeItem.createdAt,
+    updated_at: safeItem.updatedAt,
+    completed_at: safeItem.completedAt ?? null,
+    url: safeItem.url ?? null,
+    project_id: safeItem.projectId ?? null,
+    is_recurring_daily: safeItem.isRecurringDaily ?? false,
+    broken_down_from_id: safeItem.brokenDownFromId ?? null,
+    original_title: safeItem.originalTitle ?? null,
   };
 }
 
@@ -344,9 +423,11 @@ function toItemPatch(patch: Partial<HeroItem>) {
   if (patch.updatedAt !== undefined) mapped.updated_at = patch.updatedAt;
   if (patch.completedAt !== undefined) mapped.completed_at = patch.completedAt ?? null;
   if (patch.url !== undefined) mapped.url = patch.url ?? null;
-  if (patch.projectId !== undefined) mapped.project_id = patch.projectId ?? null;
+  if (patch.projectId !== undefined) mapped.project_id = sanitizeProjectId(patch.projectId) ?? null;
   if (patch.isRecurringDaily !== undefined) mapped.is_recurring_daily = patch.isRecurringDaily;
-  if (patch.brokenDownFromId !== undefined) mapped.broken_down_from_id = patch.brokenDownFromId ?? null;
+  if (patch.brokenDownFromId !== undefined) {
+    mapped.broken_down_from_id = isUuid(patch.brokenDownFromId) ? patch.brokenDownFromId : null;
+  }
   if (patch.originalTitle !== undefined) mapped.original_title = patch.originalTitle ?? null;
 
   return mapped;
@@ -551,11 +632,12 @@ export function useHeroApp() {
       if (!user || !name.trim()) return { ok: false, message: "Give the project a name first." };
 
       const nextProject: HeroProject = {
-        id: nanoid(),
+        id: createRecordId(),
         name: name.trim(),
         tone: orderedTones[projects.length % orderedTones.length],
         createdAt: new Date().toISOString(),
       };
+
 
       if (user.mode === "demo" || !remoteReady || !supabase) {
         const nextProjects = [...projects, nextProject];
@@ -589,7 +671,7 @@ export function useHeroApp() {
 
       const now = new Date().toISOString();
       const next: HeroItem = {
-        id: nanoid(),
+        id: createRecordId(),
         title: draft.title.trim(),
         type: draft.type,
         status: "upcoming",
@@ -597,10 +679,11 @@ export function useHeroApp() {
         createdAt: now,
         updatedAt: now,
         url: draft.type === "link" ? draft.url?.trim() : undefined,
-        projectId: draft.projectId || undefined,
+        projectId: sanitizeProjectId(draft.projectId),
         isRecurringDaily: draft.isRecurringDaily,
         originalTitle: draft.type === "task" ? draft.title.trim() : undefined,
       };
+
 
       if (user.mode === "demo" || !remoteReady || !supabase) {
         const nextItems = [...items, next];
