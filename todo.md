@@ -1,7 +1,10 @@
-- [ ] Reassess the original Hero extension's visual language, especially its black-and-white styling and Today-centered layout.
-- [ ] Refactor the current web UI to match the original Hero design language more closely.
-- [ ] Rework the main information architecture around a central Today list of tasks.
-- [ ] Finalize the Supabase integration layer and environment configuration for external deployment.
-- [ ] Grant the Vercel GitHub App access to the private hero-web repository from the Vercel import flow.
+- [x] Reassess the original Hero extension's visual language, especially its black-and-white styling and Today-centered layout.
+- [x] Refactor the current web UI to match the original Hero design language more closely.
+- [x] Rework the main information architecture around a central Today list of tasks.
+- [x] Finalize the Supabase integration layer and environment configuration for external deployment.
+- [x] Grant the Vercel GitHub App access to the private hero-web repository from the Vercel import flow.
+- [ ] Enable and verify Supabase email/password authentication for the deployed Hero app.
+- [ ] Confirm Supabase URL configuration for the Vercel production domain.
+- [ ] Verify the deployed login flow against the live Vercel app.
 - [ ] Connect the project to external Supabase and Vercel accounts and complete deployment.
 - [ ] Save a new checkpoint and report the updated repository and deployment status.

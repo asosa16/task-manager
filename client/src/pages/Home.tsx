@@ -51,6 +51,11 @@ export default function Home() {
   const [newProjectName, setNewProjectName] = useState("");
   const [renameValue, setRenameValue] = useState("");
   const [rescheduleValue, setRescheduleValue] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState<"signin" | "signup" | null>(null);
+
+  const hostedAuthEnabled = Boolean(import.meta.env.VITE_SUPABASE_URL);
 
   const projectMap = useMemo(
     () => new Map(hero.projects.map((project) => [project.id, project])),
@@ -214,7 +219,28 @@ export default function Home() {
   }
 
   async function handleSignIn() {
-    const result = await hero.signIn();
+    setAuthBusy("signin");
+    const result = hostedAuthEnabled
+      ? await hero.signInWithPassword(authEmail, authPassword)
+      : await hero.signIn();
+
+    setAuthBusy(null);
+
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
+    }
+    toast.success(result.message);
+  }
+
+  async function handleCreateAccount() {
+    setAuthBusy("signup");
+    const result = hostedAuthEnabled
+      ? await hero.signUpWithPassword(authEmail, authPassword)
+      : await hero.signIn();
+
+    setAuthBusy(null);
+
     if (!result.ok) {
       toast.error(result.message);
       return;
@@ -255,13 +281,61 @@ export default function Home() {
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-black/50">Original rhythm, rebuilt for the web</p>
               <h2 className="mt-3 text-6xl leading-[0.95] text-black [font-family:Georgia,serif] sm:text-7xl">A small, opinionated list for what matters today.</h2>
               <p className="mt-6 max-w-xl text-base leading-7 text-black/70">
-                This version keeps Hero fast and shortcut-driven, but adds mobile access, project tags, and a path to Google sign-in with hosted sync.
+                This version keeps Hero fast and shortcut-driven, but adds mobile access, project tags, and hosted sync with a simple email-and-password account.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Button onClick={() => void handleSignIn()} className="rounded-sm bg-black px-5 text-white hover:bg-black/90">
-                  {import.meta.env.VITE_SUPABASE_URL ? "Continue with Google" : "Open demo workspace"}
-                </Button>
-              </div>
+
+              {hostedAuthEnabled ? (
+                <div className="mt-8 max-w-md space-y-4 border border-black/10 bg-[#f7f7f7] p-4">
+                  <label className="block space-y-2 text-sm text-black/70">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-black/45">Email</span>
+                    <input
+                      value={authEmail}
+                      onChange={(event) => setAuthEmail(event.target.value)}
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      className="w-full rounded-none border border-black/15 bg-white px-3 py-2 text-base text-black placeholder:text-black/30 focus:outline-none"
+                    />
+                  </label>
+                  <label className="block space-y-2 text-sm text-black/70">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-black/45">Password</span>
+                    <input
+                      value={authPassword}
+                      onChange={(event) => setAuthPassword(event.target.value)}
+                      type="password"
+                      autoComplete="current-password"
+                      placeholder="At least 8 characters"
+                      className="w-full rounded-none border border-black/15 bg-white px-3 py-2 text-base text-black placeholder:text-black/30 focus:outline-none"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      onClick={() => void handleSignIn()}
+                      disabled={authBusy !== null}
+                      className="rounded-sm bg-black px-5 text-white hover:bg-black/90 disabled:opacity-60"
+                    >
+                      {authBusy === "signin" ? "Signing in…" : "Sign in"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleCreateAccount()}
+                      disabled={authBusy !== null}
+                      className="rounded-sm border-black/15 bg-white px-5 text-black hover:bg-black hover:text-white disabled:opacity-60"
+                    >
+                      {authBusy === "signup" ? "Creating account…" : "Create account"}
+                    </Button>
+                  </div>
+                  <p className="text-xs leading-6 text-black/55">
+                    Google login can be added later. For now, Hero uses Supabase email/password authentication.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-8 flex flex-wrap gap-3">
+                  <Button onClick={() => void handleSignIn()} className="rounded-sm bg-black px-5 text-white hover:bg-black/90">
+                    Open demo workspace
+                  </Button>
+                </div>
+              )}
             </div>
           </section>
 

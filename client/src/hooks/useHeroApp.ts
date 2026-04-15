@@ -2,7 +2,7 @@
 Design note for this file:
 - Keep Hero fast and opinionated, but make the state layer honest about storage: demo, local fallback, or live Supabase.
 - Preserve compact domain objects and shortcut-driven actions rather than introducing heavy app architecture.
-- The web rebuild should be ready for Google auth plus per-user hosted sync while remaining usable before external setup is finished.
+- The web rebuild should support per-user hosted sync with simple email/password auth first, while remaining usable before external setup is finished.
 */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { nanoid } from "nanoid";
@@ -399,7 +399,9 @@ export function useHeroApp() {
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [remoteReady, setRemoteReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>(
-    supabase ? "Supabase auth is ready. Connect tables to complete live sync." : "Demo mode is active until Supabase keys are added.",
+    supabase
+      ? "Hosted sync is ready. Sign in with email and password to load your Hero workspace."
+      : "Demo mode is active until Supabase keys are added.",
   );
 
   const applySnapshot = useCallback((snapshot: HeroSnapshot, userId: string, persistLocally = false) => {
@@ -800,19 +802,83 @@ export function useHeroApp() {
       return { ok: true, message: "Signed into demo mode." };
     }
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-
-    if (error) {
-      return { ok: false, message: error.message };
-    }
-
-    return { ok: true, message: "Redirecting to Google…" };
+    return {
+      ok: false,
+      message: "Use email and password to sign in to the hosted workspace.",
+    };
   }, [loadUserSnapshot]);
+
+  const signInWithPassword = useCallback(
+    async (email: string, password: string): Promise<MutationResult> => {
+      if (!supabase) {
+        const demo = getDemoUser();
+        setUser(demo);
+        await loadUserSnapshot(demo);
+        setAuthChecked(true);
+        return { ok: true, message: "Signed into demo mode." };
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail || !password.trim()) {
+        return { ok: false, message: "Enter both email and password." };
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (error) {
+        return { ok: false, message: error.message };
+      }
+
+      return { ok: true, message: "Signed in." };
+    },
+    [loadUserSnapshot],
+  );
+
+  const signUpWithPassword = useCallback(
+    async (email: string, password: string): Promise<MutationResult> => {
+      if (!supabase) {
+        const demo = getDemoUser();
+        setUser(demo);
+        await loadUserSnapshot(demo);
+        setAuthChecked(true);
+        return { ok: true, message: "Signed into demo mode." };
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail || !password.trim()) {
+        return { ok: false, message: "Enter both email and password." };
+      }
+
+      if (password.trim().length < 8) {
+        return { ok: false, message: "Use at least 8 characters for the password." };
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (error) {
+        return { ok: false, message: error.message };
+      }
+
+      if (data.session) {
+        return { ok: true, message: "Account created and signed in." };
+      }
+
+      return {
+        ok: true,
+        message: "Account created. Check your email if confirmation is enabled.",
+      };
+    },
+    [loadUserSnapshot],
+  );
 
   const signOut = useCallback(async () => {
     if (!supabase || user?.mode === "demo") {
@@ -879,7 +945,9 @@ export function useHeroApp() {
     rescheduleItem,
     saveDraft,
     signIn,
+    signInWithPassword,
     signOut,
+    signUpWithPassword,
     undoLastAction,
   };
 }
