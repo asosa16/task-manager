@@ -3,17 +3,28 @@ Design note for this file:
 - The archive should read like a quiet continuation of Today, not a separate dashboard.
 - Keep the interface sparse: thin borders, small navigation, and only the information needed to scan completed work.
 */
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { formatDueLabel, useHeroApp } from "@/hooks/useHeroApp";
 
-const heroMark =
-  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-icon_f01a2065.png";
+const heroLogo =
+  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
 
 export default function Done() {
   const hero = useHeroApp();
   const [, navigate] = useLocation();
   const projectMap = useMemo(() => new Map(hero.projects.map((project) => [project.id, project.name])), [hero.projects]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.key !== "Tab") return;
+      event.preventDefault();
+      navigate(event.shiftKey ? "/all" : "/");
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigate]);
 
   if (!hero.authChecked) {
     return <main className="min-h-screen bg-[#f6f6f3]" />;
@@ -24,9 +35,9 @@ export default function Done() {
       <div className="mx-auto max-w-5xl border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
         <header className="border-b border-black px-3 py-3 sm:px-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <img src={heroMark} alt="Hero" className="h-5 w-5" />
-              <span>Hero</span>
+            <div className="flex items-center gap-3 text-sm font-semibold">
+              <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
+              <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
             </div>
             <nav className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.16em] text-black/58">
               <button type="button" onClick={() => navigate("/")} className="hover:text-black">

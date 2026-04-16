@@ -14,3 +14,10 @@
 - [ ] Redesign the interface to work cleanly on phones without weakening the browser experience.
 - [ ] Implement mobile-first responsive behavior and touch-friendly controls while preserving keyboard efficiency on desktop.
 - [ ] Validate the updated experience in browser and phone-sized views before saving a new checkpoint.
+- [ ] Auto-select the task-creation input when the page loads.
+- [ ] Make Tab move between Today, All, and Done, with Shift+Tab reversing the order.
+- [ ] Add Up/Down arrow navigation through the task table.
+- [ ] Replace the plain header mark with the Hero logo in the top bar.
+- [ ] Re-verify Shift+Tab navigation from Done back to All and Today after the earlier stalled browser loop.
+- [ ] Verify Up and Down arrow keys move the selected task row through the visible list.
+- [ ] Save a fresh checkpoint after keyboard navigation verification completes.

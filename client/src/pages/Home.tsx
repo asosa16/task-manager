@@ -15,8 +15,18 @@ import {
   type HeroItem,
 } from "@/hooks/useHeroApp";
 
-const heroMark =
-  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-icon_f01a2065.png";
+const heroLogo =
+  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
+
+const primaryRouteOrder = ["/", "/all", "/done"] as const;
+
+function getPrimaryRouteTarget(currentPath: string, direction: 1 | -1) {
+  const current = primaryRouteOrder.includes(currentPath as (typeof primaryRouteOrder)[number])
+    ? (currentPath as (typeof primaryRouteOrder)[number])
+    : "/";
+  const index = primaryRouteOrder.indexOf(current);
+  return primaryRouteOrder[(index + direction + primaryRouteOrder.length) % primaryRouteOrder.length];
+}
 
 type ListMode = "today" | "all";
 type MoveMode = "after" | "chain";
@@ -105,7 +115,8 @@ function HelpPanel({
       </div>
       <div className="mt-3 space-y-2 text-black/72">
         <div className="flex items-center justify-between gap-3"><span>save from the input</span><span className="font-semibold">Enter</span></div>
-        <div className="flex items-center justify-between gap-3"><span>move focus</span><span className="font-semibold">J / K</span></div>
+        <div className="flex items-center justify-between gap-3"><span>move between Today / All / Done</span><span className="font-semibold">Tab</span></div>
+        <div className="flex items-center justify-between gap-3"><span>move focus</span><span className="font-semibold">↑ / ↓</span></div>
         <div className="flex items-center justify-between gap-3"><span>pick up selected task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop under selected task</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after selected task</span><span className="font-semibold">Shift + Enter</span></div>
@@ -147,9 +158,9 @@ function AuthShell({
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-4 py-8 text-black">
       <div className="mx-auto max-w-md border border-black bg-white p-5 shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
-        <div className="flex items-center gap-2 border-b border-black pb-3 text-sm font-semibold">
-          <img src={heroMark} alt="Hero" className="h-5 w-5" />
-          <span>Hero</span>
+        <div className="flex items-center gap-3 border-b border-black pb-3 text-sm font-semibold">
+          <img src={heroLogo} alt="Hero logo" className="h-7 w-7 rounded-[10px]" />
+          <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
         </div>
         <div className="mt-5 space-y-2">
           <h1 className="text-[24px] font-semibold leading-none">Minimal again.</h1>
@@ -202,6 +213,7 @@ export default function Home() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [completionFlashTitle, setCompletionFlashTitle] = useState<string | null>(null);
+  const captureInputRef = useRef<HTMLInputElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredItems = useMemo(
@@ -223,6 +235,17 @@ export default function Home() {
   function selectItem(itemId: string) {
     setSelectionDismissed(false);
     hero.setSelectedId(itemId);
+  }
+
+  function cyclePrimaryRoute(direction: 1 | -1) {
+    navigate(getPrimaryRouteTarget(location, direction));
+  }
+
+  function moveSelection(direction: 1 | -1) {
+    if (!displayRows.length) return;
+    const baseIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const next = displayRows[Math.min(Math.max(baseIndex + direction, 0), displayRows.length - 1)] ?? selectedRow;
+    if (next) selectItem(next.item.id);
   }
 
   function dismissFocusState() {
@@ -257,6 +280,15 @@ export default function Home() {
     const timer = window.setTimeout(() => setCompletionFlashTitle(null), 900);
     return () => window.clearTimeout(timer);
   }, [completionFlashTitle]);
+
+  useEffect(() => {
+    if (!hero.user) return undefined;
+    const timer = window.setTimeout(() => {
+      captureInputRef.current?.focus();
+      captureInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [hero.user, listMode]);
 
   useEffect(() => {
     if (!editItemId) return undefined;
@@ -344,6 +376,12 @@ export default function Home() {
 
       if (isEditingField(event.target)) return;
 
+      if (event.key === "Tab") {
+        event.preventDefault();
+        cyclePrimaryRoute(event.shiftKey ? -1 : 1);
+        return;
+      }
+
       if (event.key === "?") {
         event.preventDefault();
         setShowHelp((current) => !current);
@@ -352,17 +390,15 @@ export default function Home() {
 
       if (!displayRows.length || !selectedRow) return;
 
-      if (event.key === "j" || event.key === "J") {
+      if (event.key === "j" || event.key === "J" || event.key === "ArrowDown") {
         event.preventDefault();
-        const next = displayRows[Math.min(selectedIndex + 1, displayRows.length - 1)] ?? selectedRow;
-        selectItem(next.item.id);
+        moveSelection(1);
         return;
       }
 
-      if (event.key === "k" || event.key === "K") {
+      if (event.key === "k" || event.key === "K" || event.key === "ArrowUp") {
         event.preventDefault();
-        const next = displayRows[Math.max(selectedIndex - 1, 0)] ?? selectedRow;
-        selectItem(next.item.id);
+        moveSelection(-1);
         return;
       }
 
@@ -419,7 +455,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayRows, grabbedItemId, hero, listMode, navigate, selectedIndex, selectedRow]);
+  }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow]);
 
   if (!hero.authChecked) {
     return <main className="min-h-screen bg-[#f6f6f3]" />;
@@ -444,11 +480,12 @@ export default function Home() {
       <div className="mx-auto max-w-5xl">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
           <header className="border-b border-black px-3 py-3 sm:px-4">
-            <div className="relative flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <img src={heroMark} alt="Hero" className="h-5 w-5" />
-                <span>Hero</span>
-              </div>
+              <div className="relative flex flex-wrap items-center justify-between gap-3">
+	              <div className="flex items-center gap-3 text-sm font-semibold">
+	                <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
+	                <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+	              </div>
+
 
               <nav className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.16em] text-black/58">
                 <button
@@ -486,12 +523,29 @@ export default function Home() {
 
             <form onSubmit={submitCapture} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
               <input
+                ref={captureInputRef}
+                autoFocus
                 value={captureInput}
                 onChange={(event) => setCaptureInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     event.preventDefault();
                     dismissFocusState();
+                    return;
+                  }
+                  if (event.key === "Tab") {
+                    event.preventDefault();
+                    cyclePrimaryRoute(event.shiftKey ? -1 : 1);
+                    return;
+                  }
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    moveSelection(1);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    moveSelection(-1);
                     return;
                   }
                   if (event.key === "?" && captureInput.trim() === "") {

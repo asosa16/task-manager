@@ -8,8 +8,8 @@ import { useMemo } from "react";
 import { useLocation } from "wouter";
 import { getLocalDayKey, useHeroApp } from "@/hooks/useHeroApp";
 
-const heroMark =
-  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-icon_f01a2065.png";
+const heroLogo =
+  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
 
 function formatDayLabel(input: string) {
   const [year, month, day] = input.split("-").map(Number);
@@ -64,9 +64,9 @@ export default function Analytics() {
       <div className="mx-auto max-w-5xl border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
         <header className="border-b border-black px-3 py-3 sm:px-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <img src={heroMark} alt="Hero" className="h-5 w-5" />
-              <span>Hero</span>
+            <div className="flex items-center gap-3 text-sm font-semibold">
+              <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
+              <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
             </div>
             <nav className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.16em] text-black/58">
               <button type="button" onClick={() => navigate("/")} className="hover:text-black">

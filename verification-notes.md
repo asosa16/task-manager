@@ -87,3 +87,37 @@ The first visual pass did not capture the green flash or toast because they appe
 ## Local check: natural-language time preview
 
 Entering `call mom tomorrow morning` into the one-line composer now renders the preview text **Wake up tomorrow at 9:00 AM.** and the parsed title becomes **call mom**. This confirms the ambiguous `morning` phrase is being normalized to a more reasonable morning hour and is resolving to the **next day**, not the current day.
+
+## Local check: default focus and Tab route cycling
+
+After the latest interaction pass, the browser reports that the composer is still the active element on load. The main input is focused immediately, which satisfies the requested keyboard-first default state.
+
+Pressing **Tab** from the composer now changes the route from **Today** to **All** instead of moving browser focus through the header controls. A follow-up DOM check confirmed the path becomes `/all` and the composer remains the active input on that route, so the app stays ready for immediate typing after the view switch.
+
+## Local check: forward Tab cycle regression
+
+The first **Tab** from Today works correctly and lands on **All** while keeping the composer focused. However, a second **Tab** from that focused composer returns to **Today** instead of advancing to **Done**. A DOM check confirmed the path had reverted to `/` while the composer remained focused, so the forward Tab cycle still needs one more fix before final delivery.
+
+## Local check: forward Tab cycle fixed
+
+After the follow-up patch, opening **All** directly and pressing **Tab** now lands on **Done** as intended. The previous bounce back to Today is gone, so the forward cycle across **Today → All → Done** is now behaving correctly.
+
+## Local check: reverse Tab cycle resumed
+
+After resuming the stalled browser session, a direct DOM check confirmed that the earlier **Shift+Tab** interaction from **Done** had landed on **All** and kept the composer focused. This means the reverse cycle is now working at least for **Done → All**.
+
+## Local check: reverse cycle to Today and arrow-test setup
+
+Continuing after the stalled run, **Shift+Tab** from **All** successfully returned the app to **Today**, and the composer remained focused there. I also confirmed that the Today view currently shows only one visible task row, so meaningful up/down selection movement needs to be validated on **All**, where multiple rows are present.
+
+On **All**, the selected row before the arrow-key test is the first visible task, **Test keyboard save flow**.
+
+## Local check: ArrowDown selection movement
+
+On the **All** route, pressing **ArrowDown** moves the selected row from **Test keyboard save flow** to **Read that essay on quiet software tools**. The DOM inspection shows the selection highlight transferring from the first article to the second, so downward keyboard navigation through the list is working.
+
+## Local check: completed reverse cycle and ArrowUp movement
+
+The resumed reverse route cycle now works end to end: **Done → All** was confirmed earlier, and **All → Today** also succeeds with **Shift+Tab**, while the composer remains focused and ready for input after each route change.
+
+The list-navigation check is also complete on **All**. After **ArrowDown** moved the selection from the first task to the second, pressing **ArrowUp** moved the highlight back to **Test keyboard save flow**. This confirms both upward and downward keyboard movement through the visible task rows.
