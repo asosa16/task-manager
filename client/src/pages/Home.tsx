@@ -81,6 +81,13 @@ function dueLabelForList(input: string) {
   return formatDueLabel(input).replace(" · ", " at ");
 }
 
+function blurActiveElement() {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) {
+    active.blur();
+  }
+}
+
 function HelpPanel({
   onClose,
   onSignOut,
@@ -193,6 +200,8 @@ export default function Home() {
   const [rescheduleValue, setRescheduleValue] = useState("tomorrow 9am");
   const [grabbedItemId, setGrabbedItemId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [selectionDismissed, setSelectionDismissed] = useState(false);
+  const [completionFlashTitle, setCompletionFlashTitle] = useState<string | null>(null);
 
   const filteredItems = useMemo(
     () => (listMode === "today" ? hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt)) : hero.upcomingItems),
@@ -206,18 +215,49 @@ export default function Home() {
   const capturePreview = useMemo(() => previewCaptureInput(captureInput), [captureInput]);
   const parsedCapture = useMemo(() => parseCaptureInput(captureInput), [captureInput]);
 
+  function showActionToast(message: string, canUndo = false) {
+    toast.success(canUndo ? `${message} Press Z to undo.` : message);
+  }
+
+  function selectItem(itemId: string) {
+    setSelectionDismissed(false);
+    hero.setSelectedId(itemId);
+  }
+
+  function dismissFocusState() {
+    setShowHelp(false);
+    setMenuItemId(null);
+    setEditItemId(null);
+    setRescheduleItemId(null);
+    setGrabbedItemId(null);
+    setDraggedItemId(null);
+    setSelectionDismissed(true);
+    hero.setSelectedId(null);
+    blurActiveElement();
+  }
+
   useEffect(() => {
     if (!displayRows.length) {
       if (hero.selectedId) hero.setSelectedId(null);
       return;
     }
 
+    if (selectionDismissed && !hero.selectedId) {
+      return;
+    }
+
     if (!hero.selectedId || !displayRows.some((row) => row.item.id === hero.selectedId)) {
       hero.setSelectedId(displayRows[0].item.id);
     }
-  }, [displayRows, hero, hero.selectedId]);
+  }, [displayRows, hero, hero.selectedId, selectionDismissed]);
 
-  async function submitCapture(event?: React.FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!completionFlashTitle) return undefined;
+    const timer = window.setTimeout(() => setCompletionFlashTitle(null), 900);
+    return () => window.clearTimeout(timer);
+  }, [completionFlashTitle]);
+
+  async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const result = await hero.saveDraft({
       title: "",
@@ -227,26 +267,29 @@ export default function Home() {
     });
 
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    showActionToast(result.message);
     setCaptureInput("");
+    setSelectionDismissed(false);
   }
 
   async function markDone(itemId: string) {
+    const target = hero.items.find((item) => item.id === itemId);
     const result = await hero.markDone(itemId);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    setCompletionFlashTitle(target?.title ?? "Done");
+    showActionToast(result.message, true);
   }
 
   async function removeItem(itemId: string) {
     const result = await hero.removeItem(itemId);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    showActionToast(result.message, true);
   }
 
   async function applyMove(itemId: string, targetId: string, mode: MoveMode) {
     const result = await hero.moveItem(itemId, targetId, mode);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    showActionToast(result.message);
     setGrabbedItemId(null);
     setDraggedItemId(null);
   }
@@ -254,22 +297,31 @@ export default function Home() {
   async function submitRename(itemId: string) {
     const result = await hero.renameItem(itemId, editValue);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    showActionToast(result.message);
     setEditItemId(null);
     setMenuItemId(null);
+    blurActiveElement();
   }
 
   async function submitReschedule(itemId: string) {
     const result = await hero.rescheduleItem(itemId, rescheduleValue);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    showActionToast(result.message);
     setRescheduleItemId(null);
     setMenuItemId(null);
+    blurActiveElement();
   }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!hero.user) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissFocusState();
+        return;
+      }
+
       if (isEditingField(event.target)) return;
 
       if (event.key === "?") {
@@ -283,14 +335,14 @@ export default function Home() {
       if (event.key === "j" || event.key === "J") {
         event.preventDefault();
         const next = displayRows[Math.min(selectedIndex + 1, displayRows.length - 1)] ?? selectedRow;
-        hero.setSelectedId(next.item.id);
+        selectItem(next.item.id);
         return;
       }
 
       if (event.key === "k" || event.key === "K") {
         event.preventDefault();
         const next = displayRows[Math.max(selectedIndex - 1, 0)] ?? selectedRow;
-        hero.setSelectedId(next.item.id);
+        selectItem(next.item.id);
         return;
       }
 
@@ -298,6 +350,7 @@ export default function Home() {
         event.preventDefault();
         setGrabbedItemId((current) => (current === selectedRow.item.id ? null : selectedRow.item.id));
         setMenuItemId(null);
+        setSelectionDismissed(false);
         return;
       }
 
@@ -327,6 +380,7 @@ export default function Home() {
 
       if (event.key === "e" || event.key === "E") {
         event.preventDefault();
+        setSelectionDismissed(false);
         setMenuItemId(selectedRow.item.id);
         setEditItemId(selectedRow.item.id);
         setEditValue(selectedRow.item.title);
@@ -337,7 +391,7 @@ export default function Home() {
         event.preventDefault();
         void hero.undoLastAction().then((result) => {
           if (!result.ok) return toast.error(result.message);
-          toast.success(result.message);
+          showActionToast(result.message);
         });
       }
     }
@@ -356,6 +410,14 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-3 py-3 text-black sm:px-4">
+      {completionFlashTitle ? (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center px-3">
+          <div className="inline-flex items-center gap-2 border border-emerald-700 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 shadow-[0_8px_24px_rgba(22,101,52,0.14)]">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-xs text-white">✓</span>
+            <span>Done: {completionFlashTitle}</span>
+          </div>
+        </div>
+      ) : null}
       <div className="mx-auto max-w-5xl">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
           <header className="border-b border-black px-3 py-3 sm:px-4">
@@ -403,6 +465,17 @@ export default function Home() {
               <input
                 value={captureInput}
                 onChange={(event) => setCaptureInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    dismissFocusState();
+                    return;
+                  }
+                  if (event.key === "?" && captureInput.trim() === "") {
+                    event.preventDefault();
+                    setShowHelp((current) => !current);
+                  }
+                }}
                 placeholder="follow up with Katherine tomorrow 9am"
                 className="min-h-11 w-full border border-black bg-white px-3 text-[15px] outline-none"
               />
@@ -444,11 +517,12 @@ export default function Home() {
               return (
                 <article key={row.item.id} className={isSelected ? "bg-black/[0.035]" : "bg-white"}>
                   <div className="grid grid-cols-[92px_minmax(0,1fr)_auto] items-start gap-2 px-3 py-3 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:px-4">
-                    <button
-                      type="button"
-                      onClick={() => hero.setSelectedId(row.item.id)}
-                      className="pt-1 text-left text-[11px] leading-5 text-black/58 sm:text-xs"
-                    >
+                      <button
+                        type="button"
+                        onClick={() => selectItem(row.item.id)}
+                        className="pt-1 text-left text-[11px] leading-5 text-black/58 sm:text-xs"
+                      >
+
                       {dueLabelForList(row.item.dueAt)}
                     </button>
 
@@ -467,7 +541,7 @@ export default function Home() {
                           event.preventDefault();
                           void applyMove(sourceId, row.item.id, "chain");
                         }}
-                        onClick={() => hero.setSelectedId(row.item.id)}
+                        onClick={() => selectItem(row.item.id)}
                         onDoubleClick={() => navigate(`/due/${row.item.id}`)}
                         className="flex w-full items-start gap-3 text-left"
                       >
@@ -483,6 +557,7 @@ export default function Home() {
                           {editItemId === row.item.id ? (
                             <div className="flex flex-col gap-2 sm:flex-row">
                               <input
+                                autoFocus
                                 value={editValue}
                                 onChange={(event) => setEditValue(event.target.value)}
                                 onKeyDown={(event) => {
@@ -491,7 +566,9 @@ export default function Home() {
                                     void submitRename(row.item.id);
                                   }
                                   if (event.key === "Escape") {
+                                    event.preventDefault();
                                     setEditItemId(null);
+                                    blurActiveElement();
                                   }
                                 }}
                                 className="min-h-10 flex-1 border border-black px-3 text-sm outline-none"
@@ -505,6 +582,7 @@ export default function Home() {
                           {rescheduleItemId === row.item.id ? (
                             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                               <input
+                                autoFocus
                                 value={rescheduleValue}
                                 onChange={(event) => setRescheduleValue(event.target.value)}
                                 onKeyDown={(event) => {
@@ -513,7 +591,9 @@ export default function Home() {
                                     void submitReschedule(row.item.id);
                                   }
                                   if (event.key === "Escape") {
+                                    event.preventDefault();
                                     setRescheduleItemId(null);
+                                    blurActiveElement();
                                   }
                                 }}
                                 className="min-h-10 flex-1 border border-black px-3 text-sm outline-none"
@@ -587,10 +667,11 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => void markDone(row.item.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/56 hover:border-black hover:text-black"
-                        aria-label="Mark done"
+                        className="inline-flex h-9 min-w-9 items-center justify-center border border-black/22 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                        aria-label="Mark task done"
+                        title="Mark done"
                       >
-                        ◯
+                        ✓
                       </button>
                       <button
                         type="button"
@@ -626,7 +707,7 @@ export default function Home() {
           <footer className="border-t border-black px-3 py-3 text-[11px] uppercase tracking-[0.14em] text-black/48 sm:px-4">
             {grabbedItemId
               ? "Move mode is active. Drop under a task to create a chain, or drop after to reorder it."
-              : "Shortcuts stay hidden until you click ? or type ?. Double-click a task to open the focus view."}
+              : "Shortcuts stay hidden until you click ? or type ?. Press Escape to clear focus. Double-click a task to open the focus view."}
           </footer>
         </section>
       </div>

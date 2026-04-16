@@ -6,17 +6,18 @@ Design note for this file:
 */
 import { useMemo } from "react";
 import { useLocation } from "wouter";
-import { useHeroApp } from "@/hooks/useHeroApp";
+import { getLocalDayKey, useHeroApp } from "@/hooks/useHeroApp";
 
 const heroMark =
   "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-icon_f01a2065.png";
 
 function formatDayLabel(input: string) {
+  const [year, month, day] = input.split("-").map(Number);
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     weekday: "short",
-  }).format(new Date(input));
+  }).format(new Date(year, month - 1, day));
 }
 
 function formatTotalLabel(total: number) {
@@ -31,13 +32,12 @@ export default function Analytics() {
     const counts = new Map<string, number>();
 
     hero.doneItems.forEach((item) => {
-      const date = new Date(item.completedAt || item.updatedAt);
-      const key = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
+      const key = getLocalDayKey(item.completedAt || item.updatedAt);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     });
 
     return Array.from(counts.entries())
-      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+      .sort((a, b) => a[0].localeCompare(b[0]))
       .slice(-21)
       .map(([date, count]) => ({ date, count }));
   }, [hero.doneItems]);

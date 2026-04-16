@@ -318,10 +318,10 @@ function getDemoUser(): HeroUser {
   };
 }
 
-function normalizeParsedDate(input: string) {
+function normalizeParsedDate(input: string, referenceDate = new Date()) {
   if (!input.trim()) return null;
-  const parsed = chrono.parseDate(input, new Date(), { forwardDate: true });
-  return parsed ?? null;
+  const [match] = chrono.parse(input, referenceDate, { forwardDate: true });
+  return match?.start.date() ?? null;
 }
 
 function humanTime(date: Date) {
@@ -335,10 +335,25 @@ function collapseWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-export function formatDueLabel(input: string) {
-  const date = new Date(input);
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function getLocalDayKey(input: string | Date) {
+  const date = input instanceof Date ? input : new Date(input);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function diffLocalCalendarDays(target: Date, reference: Date) {
+  return Math.round((startOfLocalDay(target).getTime() - startOfLocalDay(reference).getTime()) / 86400000);
+}
+
+function formatDueDate(date: Date) {
   const now = new Date();
-  const diffDays = Math.round((date.getTime() - now.getTime()) / 86400000);
+  const diffDays = diffLocalCalendarDays(date, now);
 
   if (diffDays === 0) {
     return `Today · ${humanTime(date)}`;
@@ -361,6 +376,10 @@ export function formatDueLabel(input: string) {
   }).format(date);
 }
 
+export function formatDueLabel(input: string) {
+  return formatDueDate(new Date(input));
+}
+
 export function getDueMood(input: string) {
   const time = new Date(input).getTime();
   const delta = time - Date.now();
@@ -373,7 +392,7 @@ export function formatPreviewFromInput(input: string) {
   const parsed = normalizeParsedDate(input);
   if (!parsed) return "";
 
-  return formatDueLabel(parsed.toISOString())
+  return formatDueDate(parsed)
     .replace("Today · ", "today at ")
     .replace("Tomorrow · ", "tomorrow at ")
     .replace("Yesterday · ", "yesterday at ")
@@ -384,15 +403,17 @@ export function parseCaptureInput(input: string): ParsedCaptureInput | null {
   const trimmed = collapseWhitespace(input);
   if (!trimmed) return null;
 
-  const [match] = chrono.parse(trimmed, new Date(), { forwardDate: true });
+  const referenceDate = new Date();
+  const [match] = chrono.parse(trimmed, referenceDate, { forwardDate: true });
   if (!match) return null;
 
+  const parsedDate = match.start.date();
   const title = collapseWhitespace(`${trimmed.slice(0, match.index)} ${trimmed.slice(match.index + match.text.length)}`);
   if (!title) return null;
 
   return {
     title,
-    dueAt: match.start.date().toISOString(),
+    dueAt: parsedDate.toISOString(),
     matchedText: match.text,
   };
 }
@@ -697,10 +718,11 @@ export function useHeroApp() {
 
   const selectedItem = upcomingItems[selectedIndex] ?? items.find((item) => item.id === selectedId) ?? null;
   const overdueCount = upcomingItems.filter((item) => new Date(item.dueAt).getTime() < Date.now()).length;
+  const todayKey = getLocalDayKey(new Date());
   const doneTodayCount = doneItems.filter((item) => {
     const value = item.completedAt ? new Date(item.completedAt) : null;
     if (!value) return false;
-    return value.toDateString() === new Date().toDateString();
+    return getLocalDayKey(value) === todayKey;
   }).length;
 
   const dueNowItem = useMemo(
@@ -1111,12 +1133,12 @@ export function useHeroApp() {
   const streak = useMemo(() => {
     const dates = new Set(
       doneItems
-        .map((item) => item.completedAt?.slice(0, 10))
+        .map((item) => (item.completedAt ? getLocalDayKey(item.completedAt) : null))
         .filter(Boolean) as string[],
     );
     let count = 0;
     const cursor = new Date();
-    while (dates.has(cursor.toISOString().slice(0, 10))) {
+    while (dates.has(getLocalDayKey(cursor))) {
       count += 1;
       cursor.setDate(cursor.getDate() - 1);
     }
