@@ -28,3 +28,10 @@
 - [ ] Add configurable projects with name, color, and a default-project setting.
 - [ ] Show each task's project as a single colored dot on the left side of the row.
 - [ ] Add project selection in task creation and project editing when updating a task.
+- [ ] Inspect the latest repository status and remote sync state for the requested GitHub push.
+- [ ] Push the newest verified Hero changes to the connected GitHub remote.
+- [ ] Fix the focus model so navigating the task list no longer leaves the new-task input focused.
+- [ ] Make Shift+E rename the currently hovered or selected task row instead of typing into the composer.
+- [ ] Make D mark the currently hovered or selected task as done.
+- [ ] Make Space enter drag-and-drop mode for the currently hovered or selected task.
+- [ ] Add Shift+N to move focus from list navigation back to the new-task input when not editing.

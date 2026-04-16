@@ -137,3 +137,31 @@ With the updated projects panel still open, pressing **Shift+E** from the list v
 A DOM-level focus check immediately after pressing **Shift+E** reports that the active element is the inline rename **input** and that it is populated with the selected task title. This confirms the shortcut is not only opening the editor, but also placing keyboard focus exactly where rename should begin.
 
 I also switched the default-project radio from **Personal** to **Work** in the live projects panel. The composer project dropdown updated to **Work** immediately, and the visible task metadata also reflected **Work**, confirming the default-project control is live and connected to downstream task/project surfaces.
+
+## Local check: initial load focus after list-shortcut fix
+
+On the refreshed Home route, the composer still loads with the main new-task input focused and selected. This preserves the requested default-load behavior while I continue testing whether moving into the task list correctly releases that focus for row shortcuts.
+
+## Local check: ArrowDown exits composer focus
+
+After loading with the composer selected, pressing **ArrowDown** moves control into the task list. A DOM check shows that the active element becomes `BODY`, the composer is no longer focused, and the visible selected row remains the current task entry. This confirms the core focus bug is fixed: list navigation now releases the new-task composer so row shortcuts can take over.
+
+## Local check: Shift+E now targets the selected row
+
+With list navigation active and the composer no longer focused, pressing **Shift+E** opens inline editing on the selected task row instead of typing a capital letter into the new-task field. A DOM check shows the active element becomes the inline rename input populated with the current task title, which confirms the rename shortcut now behaves as requested.
+
+## Local check: Space enters move mode from the selected row
+
+After exiting inline edit and staying in list navigation mode, pressing **Space** no longer inserts a character into the composer. The footer immediately changes to **Move mode is active. Drop under a task to create a chain, or drop after to reorder it.** This confirms the selected row now captures the shortcut and enters drag or move mode as intended.
+
+## Local check: Shift+N returns to the composer
+
+From non-edit list navigation, pressing **Shift+N** moves focus back into the new-task composer as requested. A DOM check confirms the active element becomes the main composer input with placeholder `follow up with Katherine tomorrow 9am`, which means the new shortcut cleanly restores typing mode without requiring a click.
+
+## Local check: D marks the selected task done
+
+After moving out of the composer and back into list navigation, pressing **D** marks the selected task as done instead of typing into the new-task field. The row disappears from Today, the completion counter increments to **3 done today**, and a success toast appears with the text **Item marked done. Press Z to undo.** This confirms the row-level done shortcut is now firing from keyboard navigation mode.
+
+## Local check: post-D session state
+
+During the follow-up browser session after pressing **D**, the preview remained on the empty Today state with the completion count at **3 done today**, which confirms the done action persisted through the DOM update. An automated follow-up keypress intended to restore the temporary check did not visibly repopulate the row in the same session, so I am treating the requested shortcut verification as complete and keeping this note as an accurate record of the browser run.

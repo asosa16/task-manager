@@ -125,6 +125,7 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>save from the input</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>move between Today / All / Done</span><span className="font-semibold">Tab</span></div>
         <div className="flex items-center justify-between gap-3"><span>move focus</span><span className="font-semibold">↑ / ↓</span></div>
+        <div className="flex items-center justify-between gap-3"><span>jump back to new task</span><span className="font-semibold">Shift + N</span></div>
         <div className="flex items-center justify-between gap-3"><span>pick up selected task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop under selected task</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after selected task</span><span className="font-semibold">Shift + Enter</span></div>
@@ -229,7 +230,9 @@ export default function Home() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectTone, setNewProjectTone] = useState<ProjectTone>("moss");
   const captureInputRef = useRef<HTMLInputElement | null>(null);
+  const captureProjectRef = useRef<HTMLSelectElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
+  const hasAutoFocusedCaptureRef = useRef(false);
 
   const filteredItems = useMemo(
     () => (listMode === "today" ? hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt)) : hero.upcomingItems),
@@ -261,9 +264,34 @@ export default function Home() {
     setEditProjectId(resolveProjectId(item.projectId));
   }
 
-  function selectItem(itemId: string) {
+  function isComposerFocusTarget(target: EventTarget | null) {
+    return target === captureInputRef.current || target === captureProjectRef.current;
+  }
+
+  function releaseComposerFocus() {
+    if (isComposerFocusTarget(document.activeElement)) {
+      blurActiveElement();
+    }
+  }
+
+  function focusCaptureComposer() {
+    setSelectionDismissed(false);
+    setShowHelp(false);
+    setMenuItemId(null);
+    setGrabbedItemId(null);
+    setDraggedItemId(null);
+    window.setTimeout(() => {
+      captureInputRef.current?.focus();
+      captureInputRef.current?.select();
+    }, 0);
+  }
+
+  function selectItem(itemId: string, options?: { fromListNavigation?: boolean }) {
     setSelectionDismissed(false);
     hero.setSelectedId(itemId);
+    if (options?.fromListNavigation) {
+      releaseComposerFocus();
+    }
   }
 
   function cyclePrimaryRoute(direction: 1 | -1) {
@@ -274,7 +302,7 @@ export default function Home() {
     if (!displayRows.length) return;
     const baseIndex = selectedIndex >= 0 ? selectedIndex : 0;
     const next = displayRows[Math.min(Math.max(baseIndex + direction, 0), displayRows.length - 1)] ?? selectedRow;
-    if (next) selectItem(next.item.id);
+    if (next) selectItem(next.item.id, { fromListNavigation: true });
   }
 
   function dismissFocusState() {
@@ -311,13 +339,22 @@ export default function Home() {
   }, [completionFlashTitle]);
 
   useEffect(() => {
-    if (!hero.user) return undefined;
+    if (!hero.user) {
+      hasAutoFocusedCaptureRef.current = false;
+      return undefined;
+    }
+
+    if (hasAutoFocusedCaptureRef.current) {
+      return undefined;
+    }
+
+    hasAutoFocusedCaptureRef.current = true;
     const timer = window.setTimeout(() => {
       captureInputRef.current?.focus();
       captureInputRef.current?.select();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [hero.user, listMode]);
+  }, [hero.user]);
 
   useEffect(() => {
     if (!editItemId) return undefined;
@@ -449,6 +486,12 @@ export default function Home() {
 
       if (isEditingField(event.target)) return;
 
+      if (event.shiftKey && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        focusCaptureComposer();
+        return;
+      }
+
       if (event.key === "Tab") {
         event.preventDefault();
         cyclePrimaryRoute(event.shiftKey ? -1 : 1);
@@ -507,7 +550,7 @@ export default function Home() {
         return;
       }
 
-      if (event.key.toLowerCase() === "e") {
+      if (event.shiftKey && event.key.toLowerCase() === "e") {
         event.preventDefault();
         beginItemEdit(selectedRow.item);
         return;
@@ -524,7 +567,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow]);
+  }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow, editItemId, rescheduleItemId]);
 
   if (!hero.authChecked) {
     return <main className="min-h-screen bg-[#f6f6f3]" />;
@@ -684,7 +727,6 @@ export default function Home() {
             <form onSubmit={submitCapture} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
               <input
                 ref={captureInputRef}
-                autoFocus
                 value={captureInput}
                 onChange={(event) => setCaptureInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -717,6 +759,7 @@ export default function Home() {
                 className="min-h-11 w-full border border-black bg-white px-3 text-[15px] outline-none"
               />
               <select
+                ref={captureProjectRef}
                 value={captureProjectId}
                 onChange={(event) => setCaptureProjectId(event.target.value)}
                 className="min-h-11 border border-black bg-white px-3 text-sm outline-none"
@@ -769,7 +812,12 @@ export default function Home() {
                   <div className="grid grid-cols-[92px_minmax(0,1fr)_auto] items-start gap-2 px-3 py-3 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:px-4">
                       <button
                         type="button"
-                        onClick={() => selectItem(row.item.id)}
+                        onMouseEnter={() => {
+                          if (!editItemId && !rescheduleItemId) {
+                            selectItem(row.item.id, { fromListNavigation: true });
+                          }
+                        }}
+                        onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
                         className="pt-1 text-left text-[11px] leading-5 text-black/58 sm:text-xs"
                       >
 
@@ -780,6 +828,11 @@ export default function Home() {
                       <button
                         type="button"
                         draggable={listMode === "today"}
+                        onMouseEnter={() => {
+                          if (!editItemId && !rescheduleItemId) {
+                            selectItem(row.item.id, { fromListNavigation: true });
+                          }
+                        }}
                         onDragStart={() => setDraggedItemId(row.item.id)}
                         onDragEnd={() => setDraggedItemId(null)}
                         onDragOver={(event) => {
@@ -791,7 +844,7 @@ export default function Home() {
                           event.preventDefault();
                           void applyMove(sourceId, row.item.id, "chain");
                         }}
-                        onClick={() => selectItem(row.item.id)}
+                        onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
                         onDoubleClick={() => navigate(`/due/${row.item.id}`)}
                         className="flex w-full items-start gap-3 text-left"
                       >
