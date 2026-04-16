@@ -121,3 +121,19 @@ On the **All** route, pressing **ArrowDown** moves the selected row from **Test 
 The resumed reverse route cycle now works end to end: **Done → All** was confirmed earlier, and **All → Today** also succeeds with **Shift+Tab**, while the composer remains focused and ready for input after each route change.
 
 The list-navigation check is also complete on **All**. After **ArrowDown** moved the selection from the first task to the second, pressing **ArrowUp** moved the highlight back to **Test keyboard save flow**. This confirms both upward and downward keyboard movement through the visible task rows.
+
+## Local check: projects panel and color-coded tasks
+
+Reloading the updated Hero preview shows a new **Projects** control in the header, a project dropdown in the composer, and a single colored dot at the left of each visible task row. This matches the requested task-level project indicator without bloating the list layout.
+
+Opening the projects panel exposes the intended configuration surface: each project row includes a default selector, editable name field, color selector, and save button, and the panel also includes a compact flow for adding a new project. The structure is in place for default-project management and per-project color editing.
+
+## Local check: focused-row rename with Shift+E
+
+With the updated projects panel still open, pressing **Shift+E** from the list view opened inline editing on the selected task row. The live row editor now includes both the task-name input and a project dropdown, which confirms the new shortcut is invoking the focused-row edit flow and that project reassignment is available while editing.
+
+## Local check: Shift+E focus target and default-project switching
+
+A DOM-level focus check immediately after pressing **Shift+E** reports that the active element is the inline rename **input** and that it is populated with the selected task title. This confirms the shortcut is not only opening the editor, but also placing keyboard focus exactly where rename should begin.
+
+I also switched the default-project radio from **Personal** to **Work** in the live projects panel. The composer project dropdown updated to **Work** immediately, and the visible task metadata also reflected **Work**, confirming the default-project control is live and connected to downstream task/project surfaces.

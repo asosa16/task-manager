@@ -21,3 +21,10 @@
 - [ ] Re-verify Shift+Tab navigation from Done back to All and Today after the earlier stalled browser loop.
 - [ ] Verify Up and Down arrow keys move the selected task row through the visible list.
 - [ ] Save a fresh checkpoint after keyboard navigation verification completes.
+- [ ] Verify the latest repository state and remote configuration for GitHub sync.
+- [ ] Push the newest Hero changes to the connected GitHub repository.
+- [ ] Determine the exact Vercel sync handoff path for the latest Hero version.
+- [ ] Add Shift+E to rename the currently focused task row while navigating with the keyboard.
+- [ ] Add configurable projects with name, color, and a default-project setting.
+- [ ] Show each task's project as a single colored dot on the left side of the row.
+- [ ] Add project selection in task creation and project editing when updating a task.

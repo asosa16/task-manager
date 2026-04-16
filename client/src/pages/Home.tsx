@@ -11,14 +11,18 @@ import {
   formatDueLabel,
   parseCaptureInput,
   previewCaptureInput,
+  toneColorMap,
+  toneLabelMap,
   useHeroApp,
   type HeroItem,
+  type ProjectTone,
 } from "@/hooks/useHeroApp";
 
 const heroLogo =
   "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
 
 const primaryRouteOrder = ["/", "/all", "/done"] as const;
+const projectToneOptions: ProjectTone[] = ["moss", "slate", "amber", "clay", "ink"];
 
 function getPrimaryRouteTarget(currentPath: string, direction: 1 | -1) {
   const current = primaryRouteOrder.includes(currentPath as (typeof primaryRouteOrder)[number])
@@ -98,6 +102,10 @@ function blurActiveElement() {
   }
 }
 
+function ProjectDot({ tone }: { tone: ProjectTone }) {
+  return <span className="inline-block h-2.5 w-2.5 rounded-full border border-black/15" style={{ backgroundColor: toneColorMap[tone] }} />;
+}
+
 function HelpPanel({
   onClose,
   onSignOut,
@@ -122,6 +130,7 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>drop after selected task</span><span className="font-semibold">Shift + Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>mark selected done</span><span className="font-semibold">D</span></div>
         <div className="flex items-center justify-between gap-3"><span>delete selected task</span><span className="font-semibold">Delete</span></div>
+        <div className="flex items-center justify-between gap-3"><span>edit selected task</span><span className="font-semibold">Shift + E</span></div>
         <div className="flex items-center justify-between gap-3"><span>toggle this panel</span><span className="font-semibold">?</span></div>
       </div>
       <button
@@ -203,16 +212,22 @@ export default function Home() {
   const listMode: ListMode = location === "/all" ? "all" : "today";
 
   const [captureInput, setCaptureInput] = useState("");
+  const [captureProjectId, setCaptureProjectId] = useState("");
   const [showHelp, setShowHelp] = useState(false);
+  const [showProjects, setShowProjects] = useState(false);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [editProjectId, setEditProjectId] = useState("");
   const [rescheduleItemId, setRescheduleItemId] = useState<string | null>(null);
   const [rescheduleValue, setRescheduleValue] = useState("tomorrow 9am");
   const [grabbedItemId, setGrabbedItemId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [completionFlashTitle, setCompletionFlashTitle] = useState<string | null>(null);
+  const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectTone, setNewProjectTone] = useState<ProjectTone>("moss");
   const captureInputRef = useRef<HTMLInputElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -222,7 +237,8 @@ export default function Home() {
   );
 
   const displayRows = useMemo(() => buildDisplayRows(filteredItems), [filteredItems]);
-  const projectMap = useMemo(() => new Map(hero.projects.map((project) => [project.id, project.name])), [hero.projects]);
+  const projectById = useMemo(() => new Map(hero.projects.map((project) => [project.id, project])), [hero.projects]);
+  const fallbackProjectId = hero.defaultProjectId ?? hero.projects[0]?.id ?? "";
   const selectedIndex = useMemo(() => displayRows.findIndex((row) => row.item.id === hero.selectedId), [displayRows, hero.selectedId]);
   const selectedRow = selectedIndex >= 0 ? displayRows[selectedIndex] : displayRows[0] ?? null;
   const capturePreview = useMemo(() => previewCaptureInput(captureInput), [captureInput]);
@@ -230,6 +246,19 @@ export default function Home() {
 
   function showActionToast(message: string) {
     toast.success(`${message} Press Z to undo.`);
+  }
+
+  function resolveProjectId(projectId?: string | null) {
+    return projectId ?? fallbackProjectId;
+  }
+
+  function beginItemEdit(item: HeroItem) {
+    setSelectionDismissed(false);
+    setMenuItemId(item.id);
+    setRescheduleItemId(null);
+    setEditItemId(item.id);
+    setEditValue(item.title);
+    setEditProjectId(resolveProjectId(item.projectId));
   }
 
   function selectItem(itemId: string) {
@@ -299,6 +328,24 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [editItemId]);
 
+  useEffect(() => {
+    setProjectDrafts(
+      Object.fromEntries(hero.projects.map((project) => [project.id, { name: project.name, tone: project.tone }])),
+    );
+  }, [hero.projects]);
+
+  useEffect(() => {
+    if (!captureProjectId || !hero.projects.some((project) => project.id === captureProjectId)) {
+      setCaptureProjectId(fallbackProjectId);
+    }
+  }, [captureProjectId, fallbackProjectId, hero.projects]);
+
+  useEffect(() => {
+    if (editItemId && (!editProjectId || !hero.projects.some((project) => project.id === editProjectId))) {
+      setEditProjectId(fallbackProjectId);
+    }
+  }, [editItemId, editProjectId, fallbackProjectId, hero.projects]);
+
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const result = await hero.saveDraft({
@@ -306,11 +353,13 @@ export default function Home() {
       dueInput: "",
       captureInput,
       type: "task",
+      projectId: captureProjectId || fallbackProjectId || undefined,
     });
 
     if (!result.ok) return toast.error(result.message);
     showActionToast(result.message);
     setCaptureInput("");
+    setCaptureProjectId(fallbackProjectId);
     setSelectionDismissed(false);
   }
 
@@ -337,12 +386,36 @@ export default function Home() {
   }
 
   async function submitRename(itemId: string) {
-    const result = await hero.renameItem(itemId, editValue);
+    const result = await hero.renameItem(itemId, editValue, editProjectId || fallbackProjectId || undefined);
     if (!result.ok) return toast.error(result.message);
     showActionToast(result.message);
     setEditItemId(null);
     setMenuItemId(null);
     blurActiveElement();
+  }
+
+  async function submitProjectUpdate(projectId: string) {
+    const draft = projectDrafts[projectId];
+    if (!draft) return;
+    const result = await hero.updateProject(projectId, draft);
+    if (!result.ok) return toast.error(result.message);
+    toast.success(result.message);
+  }
+
+  async function submitProjectCreate(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const result = await hero.addProject(newProjectName, newProjectTone);
+    if (!result.ok) return toast.error(result.message);
+    toast.success(result.message);
+    setNewProjectName("");
+    setNewProjectTone("moss");
+  }
+
+  async function setDefaultProject(projectId: string) {
+    const result = await hero.setDefaultProject(projectId);
+    if (!result.ok) return toast.error(result.message);
+    setCaptureProjectId(projectId);
+    toast.success(result.message);
   }
 
   async function submitReschedule(itemId: string) {
@@ -434,13 +507,9 @@ export default function Home() {
         return;
       }
 
-      if (event.key === "e" || event.key === "E") {
+      if (event.key.toLowerCase() === "e") {
         event.preventDefault();
-        setSelectionDismissed(false);
-        setMenuItemId(selectedRow.item.id);
-        setRescheduleItemId(null);
-        setEditItemId(selectedRow.item.id);
-        setEditValue(selectedRow.item.title);
+        beginItemEdit(selectedRow.item);
         return;
       }
 
@@ -510,6 +579,13 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setShowProjects((current) => !current)}
+                  className="inline-flex min-h-7 items-center justify-center border border-black px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-black"
+                >
+                  Projects
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowHelp((current) => !current)}
                   className="inline-flex h-7 w-7 items-center justify-center border border-black text-[13px] font-semibold text-black"
                   aria-label="Show help"
@@ -518,10 +594,94 @@ export default function Home() {
                 </button>
               </nav>
 
+              {showProjects ? (
+                <div className="mt-4 border border-black/12 bg-[#f7f6f1] p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 pb-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-black/55">Projects</div>
+                      <div className="mt-1 text-black/72">Set a default project and keep every task tied to a color-coded lane.</div>
+                    </div>
+                    <button type="button" onClick={() => setShowProjects(false)} className="text-xs uppercase tracking-[0.14em] text-black/58 hover:text-black">
+                      close
+                    </button>
+                  </div>
+
+                  <div className="mt-3 space-y-3">
+                    {hero.projects.map((project) => {
+                      const draft = projectDrafts[project.id] ?? { name: project.name, tone: project.tone };
+                      const isDefault = hero.defaultProjectId === project.id;
+                      return (
+                        <div key={project.id} className="grid gap-2 border-b border-black/8 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[auto_minmax(0,1fr)_150px_auto] sm:items-center">
+                          <label className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-black/58">
+                            <input type="radio" name="default-project" checked={isDefault} onChange={() => void setDefaultProject(project.id)} />
+                            <span>Default</span>
+                          </label>
+                          <label className="flex items-center gap-2 border border-black/12 bg-white px-3 py-2">
+                            <ProjectDot tone={draft.tone} />
+                            <input
+                              value={draft.name}
+                              onChange={(event) =>
+                                setProjectDrafts((current) => ({
+                                  ...current,
+                                  [project.id]: { ...draft, name: event.target.value },
+                                }))
+                              }
+                              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                            />
+                          </label>
+                          <select
+                            value={draft.tone}
+                            onChange={(event) =>
+                              setProjectDrafts((current) => ({
+                                ...current,
+                                [project.id]: { ...draft, tone: event.target.value as ProjectTone },
+                              }))
+                            }
+                            className="min-h-10 border border-black/12 bg-white px-3 text-sm outline-none"
+                          >
+                            {projectToneOptions.map((tone) => (
+                              <option key={tone} value={tone}>
+                                {toneLabelMap[tone]}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="button" onClick={() => void submitProjectUpdate(project.id)} className="min-h-10 border border-black px-3 text-xs font-semibold uppercase tracking-[0.14em]">
+                            Save
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <form onSubmit={submitProjectCreate} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_150px_auto]">
+                    <input
+                      value={newProjectName}
+                      onChange={(event) => setNewProjectName(event.target.value)}
+                      placeholder="Add a project"
+                      className="min-h-10 border border-black bg-white px-3 text-sm outline-none"
+                    />
+                    <select
+                      value={newProjectTone}
+                      onChange={(event) => setNewProjectTone(event.target.value as ProjectTone)}
+                      className="min-h-10 border border-black bg-white px-3 text-sm outline-none"
+                    >
+                      {projectToneOptions.map((tone) => (
+                        <option key={tone} value={tone}>
+                          {toneLabelMap[tone]}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" className="min-h-10 border border-black bg-black px-4 text-xs font-semibold uppercase tracking-[0.16em] text-white">
+                      Add project
+                    </button>
+                  </form>
+                </div>
+              ) : null}
+
               {showHelp ? <HelpPanel onClose={() => setShowHelp(false)} onSignOut={() => void hero.signOut()} /> : null}
             </div>
 
-            <form onSubmit={submitCapture} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <form onSubmit={submitCapture} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
               <input
                 ref={captureInputRef}
                 autoFocus
@@ -556,6 +716,17 @@ export default function Home() {
                 placeholder="follow up with Katherine tomorrow 9am"
                 className="min-h-11 w-full border border-black bg-white px-3 text-[15px] outline-none"
               />
+              <select
+                value={captureProjectId}
+                onChange={(event) => setCaptureProjectId(event.target.value)}
+                className="min-h-11 border border-black bg-white px-3 text-sm outline-none"
+              >
+                {hero.projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
               <button
                 type="submit"
                 className="inline-flex min-h-11 items-center justify-center border border-black bg-black px-4 text-xs font-semibold uppercase tracking-[0.16em] text-white"
@@ -587,7 +758,9 @@ export default function Home() {
           <div className="divide-y divide-black/10">
             {displayRows.map((row) => {
               const isSelected = hero.selectedId === row.item.id;
-              const projectName = row.item.projectId ? projectMap.get(row.item.projectId) ?? null : null;
+              const project = projectById.get(resolveProjectId(row.item.projectId));
+              const projectName = project?.name ?? null;
+              const projectTone = project?.tone ?? "ink";
               const canDrop = Boolean((draggedItemId || grabbedItemId) && row.item.id !== draggedItemId && row.item.id !== grabbedItemId);
               const sourceId = draggedItemId || grabbedItemId;
 
@@ -622,7 +795,10 @@ export default function Home() {
                         onDoubleClick={() => navigate(`/due/${row.item.id}`)}
                         className="flex w-full items-start gap-3 text-left"
                       >
-                        <span className="mt-[5px] text-[10px] text-black/38">{row.depth > 0 ? "↳" : "□"}</span>
+                        <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
+                          {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
+                          <ProjectDot tone={projectTone} />
+                        </span>
                         <span className="min-w-0 flex-1">
                           <span className="block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
                           {projectName ? <span className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-black/45">{projectName}</span> : null}
@@ -651,6 +827,17 @@ export default function Home() {
                                 }}
                                 className="min-h-10 flex-1 border border-black px-3 text-sm outline-none"
                               />
+                              <select
+                                value={editProjectId}
+                                onChange={(event) => setEditProjectId(event.target.value)}
+                                className="min-h-10 border border-black px-3 text-sm outline-none"
+                              >
+                                {hero.projects.map((project) => (
+                                  <option key={project.id} value={project.id}>
+                                    {project.name}
+                                  </option>
+                                ))}
+                              </select>
                               <button type="button" onClick={() => void submitRename(row.item.id)} className="min-h-10 border border-black px-3">
                                 Save
                               </button>
@@ -685,14 +872,10 @@ export default function Home() {
                           <div className="mt-2 flex flex-wrap gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                setEditItemId(row.item.id);
-                                setEditValue(row.item.title);
-                                setRescheduleItemId(null);
-                              }}
+                              onClick={() => beginItemEdit(row.item)}
                               className="border border-black px-2 py-1"
                             >
-                              Rename
+                              Edit
                             </button>
                             <button
                               type="button"

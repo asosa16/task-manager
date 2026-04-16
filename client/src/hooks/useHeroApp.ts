@@ -104,7 +104,7 @@ export const legacyShortcutHints = [
   { key: "J / K", description: "Move focus" },
   { key: "D", description: "Mark selected done" },
   { key: "Delete", description: "Delete selected" },
-  { key: "E", description: "Edit selected item" },
+  { key: "Shift + E", description: "Edit selected item" },
   { key: "Z / U", description: "Undo last action" },
 ];
 
@@ -115,6 +115,26 @@ export const toneClassMap: Record<ProjectTone, string> = {
   clay: "bg-[#cfcfcf] text-black border-black/15",
   ink: "bg-black text-white border-black",
 };
+
+export const toneColorMap: Record<ProjectTone, string> = {
+  moss: "#5b8c5a",
+  slate: "#4f6d8a",
+  amber: "#c58b1c",
+  clay: "#b86464",
+  ink: "#111111",
+};
+
+export const toneLabelMap: Record<ProjectTone, string> = {
+  moss: "Green",
+  slate: "Blue",
+  amber: "Gold",
+  clay: "Rose",
+  ink: "Black",
+};
+
+interface HeroPreferences {
+  defaultProjectId?: string;
+}
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
@@ -225,6 +245,10 @@ function storageKey(userId: string) {
   return `hero-web::snapshot::${userId}`;
 }
 
+function preferencesKey(userId: string) {
+  return `hero-web::prefs::${userId}`;
+}
+
 function readSerialized(userId: string): HeroSnapshot | null {
   const raw = window.localStorage.getItem(storageKey(userId));
   if (!raw) return null;
@@ -237,6 +261,29 @@ function readSerialized(userId: string): HeroSnapshot | null {
 
 function persistSnapshot(userId: string, snapshot: HeroSnapshot) {
   window.localStorage.setItem(storageKey(userId), JSON.stringify(snapshot));
+}
+
+function readPreferences(userId: string): HeroPreferences {
+  const raw = window.localStorage.getItem(preferencesKey(userId));
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as HeroPreferences;
+  } catch {
+    return {};
+  }
+}
+
+function persistPreferences(userId: string, preferences: HeroPreferences) {
+  window.localStorage.setItem(preferencesKey(userId), JSON.stringify(preferences));
+}
+
+function resolveDefaultProjectId(projects: HeroProject[], preferredProjectId?: string | null) {
+  const preferred = sanitizeProjectId(preferredProjectId);
+  if (preferred && projects.some((project) => project.id === preferred)) {
+    return preferred;
+  }
+
+  return projects[0]?.id ?? null;
 }
 
 function createSeedProjects(): HeroProject[] {
@@ -694,6 +741,7 @@ export function useHeroApp() {
   const [projects, setProjects] = useState<HeroProject[]>([]);
   const [items, setItems] = useState<HeroItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [defaultProjectId, setDefaultProjectIdState] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string>("all");
   const [composerOpen, setComposerOpen] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -705,11 +753,14 @@ export function useHeroApp() {
   );
 
   const applySnapshot = useCallback((snapshot: HeroSnapshot, userId: string, persistLocally = false) => {
+    const resolvedDefaultProjectId = resolveDefaultProjectId(snapshot.projects, readPreferences(userId).defaultProjectId);
     setProjects(snapshot.projects);
     setItems(snapshot.items);
     setSelectedId(nextSelectedIdFromItems(snapshot.items));
+    setDefaultProjectIdState(resolvedDefaultProjectId);
     if (persistLocally) {
       persistSnapshot(userId, snapshot);
+      persistPreferences(userId, { defaultProjectId: resolvedDefaultProjectId ?? undefined });
     }
   }, []);
 
@@ -778,6 +829,7 @@ export function useHeroApp() {
           setProjects([]);
           setItems([]);
           setSelectedId(null);
+          setDefaultProjectIdState(null);
           setRemoteReady(false);
           setStatusMessage("Signed out.");
           return;
@@ -801,15 +853,18 @@ export function useHeroApp() {
   }, [loadUserSnapshot]);
 
   const commitLocalSnapshot = useCallback(
-    (nextProjects: HeroProject[], nextItems: HeroItem[]) => {
+    (nextProjects: HeroProject[], nextItems: HeroItem[], nextDefaultProjectId: string | null = defaultProjectId) => {
+      const resolvedDefaultProjectId = resolveDefaultProjectId(nextProjects, nextDefaultProjectId);
       setProjects(nextProjects);
       setItems(nextItems);
       setSelectedId(nextSelectedIdFromItems(nextItems));
+      setDefaultProjectIdState(resolvedDefaultProjectId);
       if (user) {
         persistSnapshot(user.id, { projects: nextProjects, items: nextItems });
+        persistPreferences(user.id, { defaultProjectId: resolvedDefaultProjectId ?? undefined });
       }
     },
-    [user],
+    [defaultProjectId, user],
   );
 
   const upcomingItems = useMemo(() => {
@@ -848,20 +903,22 @@ export function useHeroApp() {
   );
 
   const addProject = useCallback(
-    async (name: string): Promise<MutationResult> => {
+    async (
+      name: string,
+      tone: ProjectTone = orderedTones[projects.length % orderedTones.length],
+    ): Promise<MutationResult> => {
       if (!user || !name.trim()) return { ok: false, message: "Give the project a name first." };
 
       const nextProject: HeroProject = {
         id: createRecordId(),
         name: name.trim(),
-        tone: orderedTones[projects.length % orderedTones.length],
+        tone,
         createdAt: new Date().toISOString(),
       };
 
-
       if (user.mode === "demo" || !remoteReady || !supabase) {
         const nextProjects = [...projects, nextProject];
-        commitLocalSnapshot(nextProjects, items);
+        commitLocalSnapshot(nextProjects, items, defaultProjectId ?? nextProject.id);
         setActiveProjectId(nextProject.id);
         return { ok: true, message: `Project “${nextProject.name}” added.` };
       }
@@ -874,10 +931,15 @@ export function useHeroApp() {
       const inserted = mapProjectRow(result.data as ProjectRow);
       setProjects((current) => [...current, inserted]);
       setActiveProjectId(inserted.id);
+      if (!defaultProjectId) {
+        setDefaultProjectIdState(inserted.id);
+        persistPreferences(user.id, { defaultProjectId: inserted.id });
+      }
       return { ok: true, message: `Project “${inserted.name}” added.` };
     },
-    [commitLocalSnapshot, items, projects, remoteReady, user],
+    [commitLocalSnapshot, defaultProjectId, items, projects, remoteReady, user],
   );
+
 
   const saveDraft = useCallback(
     async (draft: CaptureDraft): Promise<MutationResult> => {
@@ -908,6 +970,7 @@ export function useHeroApp() {
       }
 
       const now = new Date().toISOString();
+      const nextProjectId = sanitizeProjectId(draft.projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined;
       const next: HeroItem = {
         id: createRecordId(),
         title: nextTitle,
@@ -917,7 +980,7 @@ export function useHeroApp() {
         createdAt: now,
         updatedAt: now,
         url: draft.type === "link" ? draft.url?.trim() : undefined,
-        projectId: sanitizeProjectId(draft.projectId),
+        projectId: nextProjectId,
         isRecurringDaily: draft.isRecurringDaily,
         originalTitle: draft.type === "task" ? nextTitle : undefined,
       };
@@ -981,20 +1044,23 @@ export function useHeroApp() {
       setItems((current) => current.map((item) => (item.id === itemId ? updated : item)));
       return { ok: true, message: "Item updated." };
     },
-    [commitLocalSnapshot, items, projects, remoteReady, user],
+    [commitLocalSnapshot, defaultProjectId, items, projects, remoteReady, user],
   );
 
   const renameItem = useCallback(
-    async (itemId: string, title: string): Promise<MutationResult> => {
+    async (itemId: string, title: string, projectId?: string): Promise<MutationResult> => {
       if (!title.trim()) return { ok: false, message: "Give the item a title first." };
       const target = items.find((item) => item.id === itemId);
       if (!target) return { ok: false, message: "Item not found." };
-      const result = await updateItem(itemId, { title: title.trim() });
+      const result = await updateItem(itemId, {
+        title: title.trim(),
+        projectId: sanitizeProjectId(projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined,
+      });
       if (!result.ok) return result;
       setUndoState({ kind: "update", item: target });
       return result;
     },
-    [items, updateItem],
+    [defaultProjectId, items, projects, updateItem],
   );
 
   const rescheduleItem = useCallback(
@@ -1141,6 +1207,61 @@ export function useHeroApp() {
       return { ok: true, message: `Smaller next step scheduled for ${formatDueLabel(parsed.toISOString())}.` };
     },
     [items, updateItem],
+  );
+
+  const updateProject = useCallback(
+    async (projectId: string, patch: Partial<Pick<HeroProject, "name" | "tone">>): Promise<MutationResult> => {
+      const target = projects.find((project) => project.id === projectId);
+      if (!target) return { ok: false, message: "Project not found." };
+
+      const nextName = patch.name?.trim() ?? target.name;
+      const nextTone = patch.tone ?? target.tone;
+      if (!nextName) return { ok: false, message: "Give the project a name first." };
+
+      if (user?.mode === "demo" || !remoteReady || !supabase) {
+        const nextProjects = projects.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                name: nextName,
+                tone: nextTone,
+              }
+            : project,
+        );
+        commitLocalSnapshot(nextProjects, items);
+        return { ok: true, message: "Project updated." };
+      }
+
+      if (!user) return { ok: false, message: "Please sign in first." };
+      const result = await supabase
+        .from("projects")
+        .update({ name: nextName, tone: nextTone })
+        .eq("id", projectId)
+        .eq("user_id", user.id)
+        .select()
+        .single();
+
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
+
+      const updated = mapProjectRow(result.data as ProjectRow);
+      setProjects((current) => current.map((project) => (project.id === projectId ? updated : project)));
+      return { ok: true, message: "Project updated." };
+    },
+    [commitLocalSnapshot, items, projects, remoteReady, user],
+  );
+
+  const setDefaultProject = useCallback(
+    async (projectId: string): Promise<MutationResult> => {
+      if (!user) return { ok: false, message: "Please sign in first." };
+      const target = projects.find((project) => project.id === projectId);
+      if (!target) return { ok: false, message: "Project not found." };
+      setDefaultProjectIdState(projectId);
+      persistPreferences(user.id, { defaultProjectId: projectId });
+      return { ok: true, message: `Default project set to “${target.name}”.` };
+    },
+    [projects, user],
   );
 
   const moveItem = useCallback(
@@ -1301,6 +1422,7 @@ export function useHeroApp() {
     activeProjectId,
     authChecked,
     composerOpen,
+    defaultProjectId,
     doneItems,
     doneTodayCount,
     dueNowItem,
@@ -1332,10 +1454,12 @@ export function useHeroApp() {
     renameItem,
     rescheduleItem,
     saveDraft,
+    setDefaultProject,
     signIn,
     signInWithPassword,
     signOut,
     signUpWithPassword,
     undoLastAction,
+    updateProject,
   };
 }
