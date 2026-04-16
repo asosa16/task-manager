@@ -4,7 +4,7 @@ Design note for this file:
 - Keep the surface sparse and monochrome; secondary actions should stay hidden until asked for.
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
 */
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
@@ -202,6 +202,7 @@ export default function Home() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [completionFlashTitle, setCompletionFlashTitle] = useState<string | null>(null);
+  const editInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredItems = useMemo(
     () => (listMode === "today" ? hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt)) : hero.upcomingItems),
@@ -215,8 +216,8 @@ export default function Home() {
   const capturePreview = useMemo(() => previewCaptureInput(captureInput), [captureInput]);
   const parsedCapture = useMemo(() => parseCaptureInput(captureInput), [captureInput]);
 
-  function showActionToast(message: string, canUndo = false) {
-    toast.success(canUndo ? `${message} Press Z to undo.` : message);
+  function showActionToast(message: string) {
+    toast.success(`${message} Press Z to undo.`);
   }
 
   function selectItem(itemId: string) {
@@ -257,6 +258,15 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [completionFlashTitle]);
 
+  useEffect(() => {
+    if (!editItemId) return undefined;
+    const timer = window.setTimeout(() => {
+      editInputRef.current?.focus();
+      editInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [editItemId]);
+
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const result = await hero.saveDraft({
@@ -277,13 +287,13 @@ export default function Home() {
     const result = await hero.markDone(itemId);
     if (!result.ok) return toast.error(result.message);
     setCompletionFlashTitle(target?.title ?? "Done");
-    showActionToast(result.message, true);
+    showActionToast(result.message);
   }
 
   async function removeItem(itemId: string) {
     const result = await hero.removeItem(itemId);
     if (!result.ok) return toast.error(result.message);
-    showActionToast(result.message, true);
+    showActionToast(result.message);
   }
 
   async function applyMove(itemId: string, targetId: string, mode: MoveMode) {
@@ -318,6 +328,16 @@ export default function Home() {
 
       if (event.key === "Escape") {
         event.preventDefault();
+
+        if (isEditingField(document.activeElement)) {
+          setShowHelp(false);
+          setEditItemId(null);
+          setRescheduleItemId(null);
+          setMenuItemId(null);
+          blurActiveElement();
+          return;
+        }
+
         dismissFocusState();
         return;
       }
@@ -382,6 +402,7 @@ export default function Home() {
         event.preventDefault();
         setSelectionDismissed(false);
         setMenuItemId(selectedRow.item.id);
+        setRescheduleItemId(null);
         setEditItemId(selectedRow.item.id);
         setEditValue(selectedRow.item.title);
         return;
@@ -411,12 +432,14 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-3 py-3 text-black sm:px-4">
       {completionFlashTitle ? (
-        <div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center px-3">
-          <div className="inline-flex items-center gap-2 border border-emerald-700 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 shadow-[0_8px_24px_rgba(22,101,52,0.14)]">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-xs text-white">✓</span>
-            <span>Done: {completionFlashTitle}</span>
+          <div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center px-3">
+            <div className="relative inline-flex items-center gap-3 overflow-hidden border border-emerald-700 bg-emerald-50 px-4 py-2 text-sm text-emerald-900 shadow-[0_10px_30px_rgba(22,101,52,0.18)]">
+              <span className="absolute left-2 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full bg-emerald-300/40 animate-ping" />
+              <span className="relative inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-sm font-semibold text-white">✓</span>
+              <span className="relative">Done: {completionFlashTitle}</span>
+            </div>
           </div>
-        </div>
+
       ) : null}
       <div className="mx-auto max-w-5xl">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
@@ -557,6 +580,7 @@ export default function Home() {
                           {editItemId === row.item.id ? (
                             <div className="flex flex-col gap-2 sm:flex-row">
                               <input
+                                ref={editItemId === row.item.id ? editInputRef : undefined}
                                 autoFocus
                                 value={editValue}
                                 onChange={(event) => setEditValue(event.target.value)}
@@ -667,11 +691,12 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => void markDone(row.item.id)}
-                        className="inline-flex h-9 min-w-9 items-center justify-center border border-black/22 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
-                        aria-label="Mark task done"
-                        title="Mark done"
+                        className="inline-flex h-9 min-w-[74px] items-center justify-center gap-1 border border-black/22 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                        aria-label="Mark task as done"
+                        title="Mark task as done"
                       >
-                        ✓
+                        <span aria-hidden="true">✓</span>
+                        <span>Done</span>
                       </button>
                       <button
                         type="button"

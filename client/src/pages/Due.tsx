@@ -38,12 +38,18 @@ export default function Due() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!item || isEditingField(event.target)) return;
+      if (!item) return;
       if (event.key === "Escape") {
         event.preventDefault();
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && isEditingField(active)) {
+          active.blur();
+          return;
+        }
         navigate("/");
         return;
       }
+      if (isEditingField(event.target)) return;
       if (event.key === "d" || event.key === "D") {
         event.preventDefault();
         void handleDone();
@@ -63,7 +69,7 @@ export default function Due() {
     if (!item) return;
     const result = await hero.markDone(item.id);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    toast.success(`${result.message} Press Z to undo.`);
     navigate("/done");
   }
 
@@ -71,7 +77,7 @@ export default function Due() {
     if (!item) return;
     const result = await hero.breakDownAndResnooze(item.id, smallerStep, wakeUpLater);
     if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    toast.success(`${result.message} Press Z to undo.`);
     navigate("/");
   }
 

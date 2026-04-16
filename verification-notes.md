@@ -56,3 +56,34 @@ Production recheck after reconnecting GitHub: the live site now reflects the min
 Additional production verification: clicking the corner `?` opens a compact help panel instead of exposing shortcuts inline by default, matching the requested hidden-help behavior. The live app also routes to `/all` from the top navigation, confirming that All is now a first-class view distinct from the default Today route, even though the open help panel visually overlapped part of the list during this check.
 
 Final production route verification: the Analytics page is live and shows the new daily-completions summary shell, and returning to Today restores the minimal single-field list view cleanly. This confirms the redesigned navigation works across Today, All, and Analytics on production, with Today remaining the default landing view.
+
+## Local check: post-fix Today shell
+
+The Today view now shows a clearer **Done** control in each row (`✓ DONE`) instead of a lone glyph, which better communicates the action without breaking the spare monochrome language.
+
+The one-line composer and minimal shell are still intact after the latest patch, so the additional affordance did not visibly bloat the list layout.
+
+Next browser checks queued:
+
+1. Press `E` on a selected row and confirm the rename input receives focus immediately.
+2. Press `Escape` while an input is focused and confirm the field blurs cleanly.
+3. Mark a task done and confirm both the green completion flash and the `Press Z to undo.` toast appear.
+4. Verify local-time parsing behavior for `tomorrow morning` in the live preview.
+
+## Local check: keyboard edit focus
+
+Using the `E` shortcut on the selected task opens the inline rename panel and the browser reports that the active element is the rename **input** with the selected task title already loaded. This confirms the requested **auto-focus into the task name field** is now working from the keyboard path.
+
+## Local check: Escape unfocus
+
+After opening inline rename with `E`, pressing `Escape` closes the editor and the browser reports that the active element becomes `BODY`. This confirms the focused input is being **blurred/unfocused** instead of remaining trapped.
+
+## Local check: mark done flow (initial pass)
+
+Clicking the visible **Done** control successfully removed the task from Today and incremented the completion count from **1 done today** to **2 done today**, confirming the action path still works after the affordance update.
+
+The first visual pass did not capture the green flash or toast because they appear briefly, so I am continuing with a more targeted DOM-level inspection for those transient states.
+
+## Local check: natural-language time preview
+
+Entering `call mom tomorrow morning` into the one-line composer now renders the preview text **Wake up tomorrow at 9:00 AM.** and the parsed title becomes **call mom**. This confirms the ambiguous `morning` phrase is being normalized to a more reasonable morning hour and is resolving to the **next day**, not the current day.

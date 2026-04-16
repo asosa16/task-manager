@@ -65,7 +65,7 @@ interface HeroSnapshot {
 }
 
 interface UndoState {
-  kind: "delete" | "done";
+  kind: "delete" | "done" | "create" | "update";
   item: HeroItem;
 }
 
@@ -318,14 +318,127 @@ function getDemoUser(): HeroUser {
   };
 }
 
-function normalizeParsedDate(input: string, referenceDate = new Date()) {
-  if (!input.trim()) return null;
-  const [match] = chrono.parse(input, referenceDate, { forwardDate: true });
-  return match?.start.date() ?? null;
+function getHeroTimeZone() {
+  if (typeof window !== "undefined") {
+    const stored = window.localStorage.getItem("hero-timezone");
+    if (stored) return stored;
+
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (browserTimeZone) {
+      window.localStorage.setItem("hero-timezone", browserTimeZone);
+      return browserTimeZone;
+    }
+  }
+
+  return "UTC";
 }
 
-function humanTime(date: Date) {
+function getTimeZoneParts(
+  date: Date,
+  timeZone: string,
+  weekday: "long" | "short" | undefined = undefined,
+) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    ...(weekday ? { weekday } : {}),
+  });
+
+  const parts = formatter.formatToParts(date);
+  const valueFor = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "0";
+
+  return {
+    year: Number(valueFor("year")),
+    month: Number(valueFor("month")),
+    day: Number(valueFor("day")),
+    hour: Number(valueFor("hour")),
+    minute: Number(valueFor("minute")),
+    second: Number(valueFor("second")),
+    weekday: weekday ? valueFor("weekday") : "",
+  };
+}
+
+function getReferenceDateForTimeZone(timeZone: string) {
+  const now = getTimeZoneParts(new Date(), timeZone);
+  return new Date(now.year, now.month - 1, now.day, now.hour, now.minute, now.second);
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+  const zoned = getTimeZoneParts(date, timeZone);
+  const zonedTimestamp = Date.UTC(
+    zoned.year,
+    zoned.month - 1,
+    zoned.day,
+    zoned.hour,
+    zoned.minute,
+    zoned.second,
+  );
+
+  return zonedTimestamp - date.getTime();
+}
+
+function wallClockDateToInstant(date: Date, timeZone: string) {
+  const utcGuess = Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+    date.getMilliseconds(),
+  );
+
+  let resolved = new Date(utcGuess - getTimeZoneOffsetMs(new Date(utcGuess), timeZone));
+  const refinedOffset = getTimeZoneOffsetMs(resolved, timeZone);
+  resolved = new Date(utcGuess - refinedOffset);
+  return resolved;
+}
+
+function withClock(date: Date, hour: number, minute = 0) {
+  const next = new Date(date);
+  next.setHours(hour, minute, 0, 0);
+  return next;
+}
+
+function hasExplicitClockTime(input: string) {
+  return /\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\bnoon\b|\bmidnight\b/i.test(input);
+}
+
+function applyDaypartDefaults(matchText: string, parsedDate: Date, match: chrono.ParsedResult) {
+  const lower = matchText.toLowerCase();
+  if (hasExplicitClockTime(lower)) return parsedDate;
+  if (match.start.isCertain("hour") || match.start.isCertain("minute")) return parsedDate;
+
+  if (/\bmorning\b/.test(lower)) return withClock(parsedDate, 9);
+  if (/\bafternoon\b/.test(lower)) return withClock(parsedDate, 15);
+  if (/\bevening\b/.test(lower)) return withClock(parsedDate, 18);
+  if (/\btonight\b/.test(lower)) return withClock(parsedDate, 20);
+
+  return parsedDate;
+}
+
+function normalizeParsedDate(
+  input: string,
+  referenceDate = getReferenceDateForTimeZone(getHeroTimeZone()),
+  timeZone = getHeroTimeZone(),
+) {
+  if (!input.trim()) return null;
+  const [match] = chrono.parse(input, referenceDate, { forwardDate: true });
+  if (!match) return null;
+
+  const adjustedDate = applyDaypartDefaults(match.text, match.start.date(), match);
+  return wallClockDateToInstant(adjustedDate, timeZone);
+}
+
+function humanTime(date: Date, timeZone = getHeroTimeZone()) {
   return new Intl.DateTimeFormat("en-US", {
+    timeZone,
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
@@ -335,40 +448,42 @@ function collapseWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+function localDayNumber(date: Date, timeZone = getHeroTimeZone()) {
+  const parts = getTimeZoneParts(date, timeZone);
+  return Date.UTC(parts.year, parts.month - 1, parts.day) / 86400000;
 }
 
-export function getLocalDayKey(input: string | Date) {
+export function getLocalDayKey(input: string | Date, timeZone = getHeroTimeZone()) {
   const date = input instanceof Date ? input : new Date(input);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const parts = getTimeZoneParts(date, timeZone);
+  const month = `${parts.month}`.padStart(2, "0");
+  const day = `${parts.day}`.padStart(2, "0");
+  return `${parts.year}-${month}-${day}`;
 }
 
-function diffLocalCalendarDays(target: Date, reference: Date) {
-  return Math.round((startOfLocalDay(target).getTime() - startOfLocalDay(reference).getTime()) / 86400000);
+function diffLocalCalendarDays(target: Date, reference: Date, timeZone = getHeroTimeZone()) {
+  return localDayNumber(target, timeZone) - localDayNumber(reference, timeZone);
 }
 
-function formatDueDate(date: Date) {
+function formatDueDate(date: Date, timeZone = getHeroTimeZone()) {
   const now = new Date();
-  const diffDays = diffLocalCalendarDays(date, now);
+  const diffDays = diffLocalCalendarDays(date, now, timeZone);
 
   if (diffDays === 0) {
-    return `Today · ${humanTime(date)}`;
+    return `Today · ${humanTime(date, timeZone)}`;
   }
   if (diffDays === 1) {
-    return `Tomorrow · ${humanTime(date)}`;
+    return `Tomorrow · ${humanTime(date, timeZone)}`;
   }
   if (diffDays === -1) {
-    return `Yesterday · ${humanTime(date)}`;
+    return `Yesterday · ${humanTime(date, timeZone)}`;
   }
   if (diffDays < 7 && diffDays > -7) {
-    return `${new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date)} · ${humanTime(date)}`;
+    return `${getTimeZoneParts(date, timeZone, "long").weekday} · ${humanTime(date, timeZone)}`;
   }
 
   return new Intl.DateTimeFormat("en-US", {
+    timeZone,
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -389,10 +504,11 @@ export function getDueMood(input: string) {
 }
 
 export function formatPreviewFromInput(input: string) {
-  const parsed = normalizeParsedDate(input);
+  const timeZone = getHeroTimeZone();
+  const parsed = normalizeParsedDate(input, getReferenceDateForTimeZone(timeZone), timeZone);
   if (!parsed) return "";
 
-  return formatDueDate(parsed)
+  return formatDueDate(parsed, timeZone)
     .replace("Today · ", "today at ")
     .replace("Tomorrow · ", "tomorrow at ")
     .replace("Yesterday · ", "yesterday at ")
@@ -403,11 +519,12 @@ export function parseCaptureInput(input: string): ParsedCaptureInput | null {
   const trimmed = collapseWhitespace(input);
   if (!trimmed) return null;
 
-  const referenceDate = new Date();
+  const timeZone = getHeroTimeZone();
+  const referenceDate = getReferenceDateForTimeZone(timeZone);
   const [match] = chrono.parse(trimmed, referenceDate, { forwardDate: true });
   if (!match) return null;
 
-  const parsedDate = match.start.date();
+  const parsedDate = wallClockDateToInstant(applyDaypartDefaults(match.text, match.start.date(), match), timeZone);
   const title = collapseWhitespace(`${trimmed.slice(0, match.index)} ${trimmed.slice(match.index + match.text.length)}`);
   if (!title) return null;
 
@@ -810,6 +927,7 @@ export function useHeroApp() {
         const nextItems = [...items, next];
         commitLocalSnapshot(projects, nextItems);
         setSelectedId(next.id);
+        setUndoState({ kind: "create", item: next });
         setComposerOpen(false);
         return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
       }
@@ -822,6 +940,7 @@ export function useHeroApp() {
       const inserted = mapItemRow(result.data as ItemRow);
       setItems((current) => [...current, inserted]);
       setSelectedId(inserted.id);
+      setUndoState({ kind: "create", item: inserted });
       setComposerOpen(false);
       return { ok: true, message: `Saved for ${formatDueLabel(inserted.dueAt)}.` };
     },
@@ -868,20 +987,28 @@ export function useHeroApp() {
   const renameItem = useCallback(
     async (itemId: string, title: string): Promise<MutationResult> => {
       if (!title.trim()) return { ok: false, message: "Give the item a title first." };
-      return updateItem(itemId, { title: title.trim() });
+      const target = items.find((item) => item.id === itemId);
+      if (!target) return { ok: false, message: "Item not found." };
+      const result = await updateItem(itemId, { title: title.trim() });
+      if (!result.ok) return result;
+      setUndoState({ kind: "update", item: target });
+      return result;
     },
-    [updateItem],
+    [items, updateItem],
   );
 
   const rescheduleItem = useCallback(
     async (itemId: string, dueInput: string): Promise<MutationResult> => {
+      const target = items.find((item) => item.id === itemId);
+      if (!target) return { ok: false, message: "Item not found." };
       const parsed = normalizeParsedDate(dueInput);
       if (!parsed) return { ok: false, message: "Could not interpret the new reminder time." };
       const result = await updateItem(itemId, { dueAt: parsed.toISOString() });
       if (!result.ok) return result;
+      setUndoState({ kind: "update", item: target });
       return { ok: true, message: `Rescheduled to ${formatDueLabel(parsed.toISOString())}.` };
     },
-    [updateItem],
+    [items, updateItem],
   );
 
   const markDone = useCallback(
@@ -956,6 +1083,24 @@ export function useHeroApp() {
       return { ok: true, message: "Deletion undone." };
     }
 
+    if (undoState.kind === "create") {
+      const created = undoState.item;
+      if (user?.mode === "demo" || !remoteReady || !supabase) {
+        const nextItems = items.filter((item) => item.id !== created.id);
+        commitLocalSnapshot(projects, nextItems);
+        setUndoState(null);
+        return { ok: true, message: "Creation undone." };
+      }
+
+      if (!user) return { ok: false, message: "Please sign in first." };
+      const result = await supabase.from("items").delete().eq("id", created.id).eq("user_id", user.id);
+      if (result.error) return { ok: false, message: result.error.message };
+
+      setItems((current) => current.filter((item) => item.id !== created.id));
+      setUndoState(null);
+      return { ok: true, message: "Creation undone." };
+    }
+
     const restored = undoState.item;
     const result = await updateItem(restored.id, {
       title: restored.title,
@@ -974,7 +1119,7 @@ export function useHeroApp() {
     if (!result.ok) return result;
     setSelectedId(restored.id);
     setUndoState(null);
-    return { ok: true, message: "Completion undone." };
+    return { ok: true, message: undoState.kind === "done" ? "Completion undone." : "Change undone." };
   }, [commitLocalSnapshot, items, projects, remoteReady, undoState, updateItem, user]);
 
   const breakDownAndResnooze = useCallback(
@@ -992,6 +1137,7 @@ export function useHeroApp() {
         originalTitle: target.originalTitle || target.title,
       });
       if (!result.ok) return result;
+      setUndoState({ kind: "update", item: target });
       return { ok: true, message: `Smaller next step scheduled for ${formatDueLabel(parsed.toISOString())}.` };
     },
     [items, updateItem],
@@ -1023,6 +1169,7 @@ export function useHeroApp() {
       });
 
       if (!result.ok) return result;
+      setUndoState({ kind: "update", item: source });
       return {
         ok: true,
         message: mode === "chain" ? `Chained under “${target.title}”.` : `Moved after “${target.title}”.`,
