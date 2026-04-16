@@ -50,3 +50,9 @@ The updated Done route now presents as the same restrained shell with a stacked 
 ## Local check: responsive due flow
 
 Opening a task from Today now lands on a simplified due screen with one clear textarea, one resnooze field, and large action buttons, which is a better fit for phone use than the previous denser layout. Returning from the due route back to Today works cleanly, so the main mobile-oriented workflow remains connected end to end.
+
+Production recheck after reconnecting GitHub: the live site now reflects the minimalist redesign commit. The default route is Today, the single one-line input is present with the prompt `follow up with Katherine tomorrow 9am`, shortcuts are not exposed in the main shell, and navigation shows Today, All, Analytics, and Done in a minimal top bar. The current production list shows the reduced monochrome rows and sparse action buttons, confirming the new design is deployed.
+
+Additional production verification: clicking the corner `?` opens a compact help panel instead of exposing shortcuts inline by default, matching the requested hidden-help behavior. The live app also routes to `/all` from the top navigation, confirming that All is now a first-class view distinct from the default Today route, even though the open help panel visually overlapped part of the list during this check.
+
+Final production route verification: the Analytics page is live and shows the new daily-completions summary shell, and returning to Today restores the minimal single-field list view cleanly. This confirms the redesigned navigation works across Today, All, and Analytics on production, with Today remaining the default landing view.
