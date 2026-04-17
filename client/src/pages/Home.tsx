@@ -130,8 +130,8 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>pick up selected task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop under selected task</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after selected task</span><span className="font-semibold">Shift + Enter</span></div>
-        <div className="flex items-center justify-between gap-3"><span>mark selected done</span><span className="font-semibold">D</span></div>
-        <div className="flex items-center justify-between gap-3"><span>delete selected task</span><span className="font-semibold">Delete</span></div>
+        <div className="flex items-center justify-between gap-3"><span>mark selected done</span><span className="font-semibold">D <span className="text-black/40">/ ⇧⌘D while typing</span></span></div>
+        <div className="flex items-center justify-between gap-3"><span>delete selected task</span><span className="font-semibold">Delete <span className="text-black/40">/ ⇧⌘⌫ while typing</span></span></div>
         <div className="flex items-center justify-between gap-3"><span>toggle this panel</span><span className="font-semibold">?</span></div>
       </div>
       <button
@@ -516,6 +516,18 @@ export default function Home() {
         }
 
         dismissFocusState();
+        return;
+      }
+
+      const usesShortcutModifier = (event.metaKey || event.ctrlKey) && event.shiftKey;
+      if (usesShortcutModifier && selectedRow && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        void markDone(selectedRow.item.id);
+        return;
+      }
+      if (usesShortcutModifier && selectedRow && (event.key === "Backspace" || event.key === "Delete")) {
+        event.preventDefault();
+        void removeItem(selectedRow.item.id);
         return;
       }
 
