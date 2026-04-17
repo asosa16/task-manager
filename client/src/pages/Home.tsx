@@ -526,7 +526,7 @@ export default function Home() {
     } else {
       if (!pendingDefaultCapture) {
         setPendingDefaultCapture(true);
-        toast("No wake-up time detected. Press Enter again to use default (tomorrow 8am).", {
+        toast("No wake-up time detected. Add again to use default (tomorrow 8am).", {
           duration: 6000,
         });
         return;
@@ -791,7 +791,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowHelp((current) => !current)}
-                  className="inline-flex h-7 w-7 items-center justify-center border border-black text-[13px] font-semibold text-black"
+                  className="hidden h-7 w-7 items-center justify-center border border-black text-[13px] font-semibold text-black sm:inline-flex"
                   aria-label="Show help"
                 >
                   ?
@@ -941,8 +941,8 @@ export default function Home() {
               <div>
                 {captureInput.trim()
                   ? pendingDefaultCapture
-                    ? "No wake-up time detected. Press Enter again to save with tomorrow 8am."
-                    : capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am” — or press Enter twice to use tomorrow 8am."
+                    ? "No wake-up time detected. Add again to save with tomorrow 8am."
+                    : capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am” — or add twice to use tomorrow 8am."
                   : "One line only: task name plus wake-up time."}
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -958,7 +958,7 @@ export default function Home() {
               </div>
             ) : pendingDefaultCapture && captureInput.trim() ? (
               <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-amber-700">
-                Press Enter again → “{captureInput.trim()}” · tomorrow 8am
+                Add again → “{captureInput.trim()}” · tomorrow 8am
               </div>
             ) : null}
           </header>
@@ -1230,7 +1230,7 @@ export default function Home() {
             ) : null}
           </div>
 
-          <footer className={`border-t border-black px-3 py-3 sm:px-4 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
+          <footer className={`hidden border-t border-black px-3 py-3 sm:block sm:px-4 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
             <div className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black">
               {activeItemId
                 ? "Task active"
