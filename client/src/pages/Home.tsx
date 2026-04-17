@@ -226,7 +226,6 @@ export default function Home() {
   const [grabbedItemId, setGrabbedItemId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
-  const [completionFlashTitle, setCompletionFlashTitle] = useState<string | null>(null);
   const [completingItemId, setCompletingItemId] = useState<string | null>(null);
   const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
   const [newProjectName, setNewProjectName] = useState("");
@@ -368,12 +367,6 @@ export default function Home() {
   }, [displayRows, hero, hero.selectedId, selectionDismissed]);
 
   useEffect(() => {
-    if (!completionFlashTitle) return undefined;
-    const timer = window.setTimeout(() => setCompletionFlashTitle(null), 1400);
-    return () => window.clearTimeout(timer);
-  }, [completionFlashTitle]);
-
-  useEffect(() => {
     if (!hero.user) {
       hasAutoFocusedCaptureRef.current = false;
       return undefined;
@@ -436,7 +429,6 @@ export default function Home() {
   }
 
   async function markDone(itemId: string) {
-    const target = hero.items.find((item) => item.id === itemId);
     if (editItemId === itemId) {
       setEditItemId(null);
       blurActiveElement();
@@ -446,7 +438,6 @@ export default function Home() {
     const result = await hero.markDone(itemId);
     setCompletingItemId(null);
     if (!result.ok) return toast.error(result.message);
-    setCompletionFlashTitle(target?.title ?? "Done");
     showActionToast(result.message);
   }
 
@@ -629,21 +620,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-3 py-3 text-black sm:px-4">
-      {completionFlashTitle ? (
-        <div className="pointer-events-none fixed inset-x-0 top-5 z-40 flex justify-center px-3">
-          <div className="relative inline-flex items-center gap-3 overflow-hidden rounded-sm border border-emerald-700 bg-emerald-50 px-5 py-3 text-sm text-emerald-900 shadow-[0_14px_40px_rgba(22,101,52,0.24)]">
-            <span className="hero-done-burst absolute left-4 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full bg-emerald-300/55" />
-            <span className="hero-done-check-mark relative inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-700 text-base font-semibold text-white">
-              ✓
-            </span>
-            <div className="relative flex flex-col leading-tight">
-              <span className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Nice work</span>
-              <span className="text-[15px] font-medium">{completionFlashTitle}</span>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      <div className="mx-auto max-w-5xl">
+<div className="mx-auto max-w-5xl">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
           <header className="border-b border-black px-3 py-3 sm:px-4">
               <div className="relative flex flex-wrap items-center justify-between gap-3">
