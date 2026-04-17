@@ -137,10 +137,10 @@ function HeaderClock() {
           :
         </span>
         <span>{padded(minutes)}</span>
-        <span className="ml-1 text-[10px] uppercase tracking-[0.22em] text-black/55 sm:text-[11px]">{suffix}</span>
-      </span>
-      <span className="hidden text-[10px] uppercase tracking-[0.24em] text-black/40 sm:inline" style={{ fontFamily: "system-ui" }}>
-        :{padded(seconds)}
+        <span className="ml-[2px] hidden text-[10px] uppercase tracking-[0.24em] text-black/40 sm:inline" style={{ fontFamily: "system-ui" }}>
+          :{padded(seconds)}
+        </span>
+        <span className="ml-2 text-[10px] uppercase tracking-[0.22em] text-black/55 sm:text-[11px]">{suffix}</span>
       </span>
     </time>
   );
