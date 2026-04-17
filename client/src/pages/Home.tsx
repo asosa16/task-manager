@@ -689,7 +689,7 @@ export default function Home() {
       const usesShortcutModifier = (event.metaKey || event.ctrlKey) && event.shiftKey;
       if (usesShortcutModifier && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        const targetId = hoveredItemId ?? selectedRow?.item.id ?? null;
+        const targetId = selectedRow?.item.id ?? hoveredItemId ?? null;
         if (targetId) {
           setActiveItemId(targetId);
           setEditItemId(null);
