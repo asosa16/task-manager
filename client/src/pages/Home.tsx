@@ -127,7 +127,7 @@ function HeaderClock() {
       className="inline-flex items-baseline gap-2 font-serif leading-none"
       style={{ fontVariantNumeric: "tabular-nums" }}
     >
-      <span className="inline-flex items-baseline text-[22px] tracking-tight text-black">
+      <span className="inline-flex items-baseline text-[18px] tracking-tight text-black sm:text-[22px]">
         <span>{padded(displayHours)}</span>
         <span
           aria-hidden="true"
@@ -137,9 +137,9 @@ function HeaderClock() {
           :
         </span>
         <span>{padded(minutes)}</span>
-        <span className="ml-1 text-[11px] uppercase tracking-[0.22em] text-black/55">{suffix}</span>
+        <span className="ml-1 text-[10px] uppercase tracking-[0.22em] text-black/55 sm:text-[11px]">{suffix}</span>
       </span>
-      <span className="text-[10px] uppercase tracking-[0.24em] text-black/40" style={{ fontFamily: "system-ui" }}>
+      <span className="hidden text-[10px] uppercase tracking-[0.24em] text-black/40 sm:inline" style={{ fontFamily: "system-ui" }}>
         :{padded(seconds)}
       </span>
     </time>
@@ -760,7 +760,7 @@ export default function Home() {
 	              </div>
 
 
-              <nav className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.16em] text-black/58">
+              <nav className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] uppercase tracking-[0.14em] text-black/58 sm:text-xs sm:tracking-[0.16em]">
                 <button
                   type="button"
                   onClick={() => navigate("/")}
@@ -784,7 +784,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowProjects((current) => !current)}
-                  className="inline-flex min-h-7 items-center justify-center border border-black px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-black"
+                  className="inline-flex min-h-7 items-center justify-center border border-black px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-black sm:text-[11px]"
                 >
                   Projects
                 </button>
@@ -868,7 +868,7 @@ export default function Home() {
               {showHelp ? <HelpPanel onClose={() => setShowHelp(false)} onSignOut={() => void hero.signOut()} /> : null}
             </div>
 
-            <form onSubmit={submitCapture} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
+            <form onSubmit={submitCapture} className="mt-4 flex flex-col gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_180px_auto]">
               <input
                 ref={captureInputRef}
                 value={captureInput}
@@ -915,24 +915,26 @@ export default function Home() {
                 placeholder="follow up with Katherine tomorrow 9am"
                 className="min-h-11 w-full border border-black bg-white px-3 text-[15px] outline-none"
               />
-              <select
-                ref={captureProjectRef}
-                value={captureProjectId}
-                onChange={(event) => setCaptureProjectId(event.target.value)}
-                className="min-h-11 border border-black bg-white px-3 text-sm outline-none"
-              >
-                {hero.projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="inline-flex min-h-11 items-center justify-center border border-black bg-black px-4 text-xs font-semibold uppercase tracking-[0.16em] text-white"
-              >
-                Add
-              </button>
+              <div className="flex gap-2 sm:contents">
+                <select
+                  ref={captureProjectRef}
+                  value={captureProjectId}
+                  onChange={(event) => setCaptureProjectId(event.target.value)}
+                  className="min-h-11 min-w-0 flex-1 border border-black bg-white px-3 text-sm outline-none sm:flex-auto"
+                >
+                  {hero.projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="inline-flex min-h-11 shrink-0 items-center justify-center border border-black bg-black px-4 text-xs font-semibold uppercase tracking-[0.16em] text-white"
+                >
+                  Add
+                </button>
+              </div>
             </form>
 
             <div className="mt-2 flex flex-col gap-1 text-xs text-black/68 sm:flex-row sm:items-center sm:justify-between">
@@ -989,7 +991,7 @@ export default function Home() {
                   onMouseEnter={() => setHoveredItemId(row.item.id)}
                   onMouseLeave={() => setHoveredItemId((current) => (current === row.item.id ? null : current))}
                 >
-                  <div className="grid grid-cols-[92px_minmax(0,1fr)_auto] items-start gap-2 px-3 py-3 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:px-4">
+                  <div className="flex flex-col gap-2 px-3 py-3 sm:grid sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-start sm:gap-3 sm:px-4">
                       <button
                         type="button"
                         onMouseEnter={() => {
@@ -998,15 +1000,20 @@ export default function Home() {
                           }
                         }}
                         onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
-                        className={`pt-1 text-left text-[11px] leading-5 sm:text-xs ${isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
+                        className={`hidden text-left text-[11px] leading-5 sm:block sm:pt-1 sm:text-xs ${isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
                       >
-
                       {dueLabelForList(row.item.dueAt)}
                     </button>
 
                     <div className="min-w-0">
+                      <div className={`flex items-center justify-between gap-2 sm:hidden ${isPastDue ? "text-red-800" : "text-black/55"}`}>
+                        <span className={`text-[11px] ${isPastDue ? "font-semibold" : ""}`}>{dueLabelForList(row.item.dueAt)}</span>
+                        {projectName ? (
+                          <span className="text-[10px] uppercase tracking-[0.14em] text-black/45">{projectName}</span>
+                        ) : null}
+                      </div>
                       {isEditingRow ? (
-                        <div className="flex w-full items-start gap-3">
+                        <div className="mt-1 flex w-full items-start gap-3 sm:mt-0">
                           <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
                             {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
                             <ProjectDot tone={projectTone} />
@@ -1075,7 +1082,7 @@ export default function Home() {
                           }}
                           onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
                           onDoubleClick={() => beginItemEdit(row.item)}
-                          className="flex w-full items-start gap-3 text-left"
+                          className="mt-1 flex w-full items-start gap-3 text-left sm:mt-0"
                         >
                           <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
                             {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
@@ -1083,7 +1090,7 @@ export default function Home() {
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="hero-title-text block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
-                            {projectName ? <span className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-black/45">{projectName}</span> : null}
+                            {projectName ? <span className="mt-1 hidden text-[11px] uppercase tracking-[0.14em] text-black/45 sm:block">{projectName}</span> : null}
                           </span>
                           {isCompletingRow ? (
                             <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
@@ -1178,17 +1185,17 @@ export default function Home() {
                       ) : null}
                     </div>
 
-                    <div className={`flex items-center gap-1 pl-1 transition-opacity ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
+                    <div className={`flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
                       <button
                         type="button"
                         disabled={actionsDimmed || isCompletingRow}
                         onClick={() => void markDone(row.item.id)}
-                        className="inline-flex h-9 min-w-[74px] items-center justify-center gap-1 border border-black/22 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed"
+                        className="inline-flex h-9 w-9 items-center justify-center gap-1 border border-black/22 px-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed sm:w-auto sm:min-w-[74px] sm:px-2"
                         aria-label="Mark task as done"
                         title="Mark task as done"
                       >
                         <span aria-hidden="true">✓</span>
-                        <span>Done</span>
+                        <span className="hidden sm:inline">Done</span>
                       </button>
                       <button
                         type="button"
@@ -1247,7 +1254,7 @@ export default function Home() {
                   : rescheduleItemId
                     ? "Type a new wake-up time · Enter saves · Escape cancels."
                     : editItemId
-                      ? "Enter saves · Escape exits edit · ↑ / ↓ move to the next task · ⇧⌘D to mark done · ⇧⌘⌫ to delete."
+                      ? "Enter saves · Escape exits edit · ↑ / ↓ move to the next task · ⇧⌘D to mark done · ⇧⌘⌫ to delete · ⇧⌘A to activate task."
                       : captureFocused
                         ? "Enter saves · Escape clears focus · ↓ jumps into the first task."
                         : "Press T for a new task · ↑ / ↓ edit as you browse · ⇧⌘A to activate the hovered task · Escape returns to shortcuts · ? for help."}
