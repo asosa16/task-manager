@@ -106,6 +106,46 @@ function ProjectDot({ tone }: { tone: ProjectTone }) {
   return <span className="inline-block h-2.5 w-2.5 rounded-full border border-black/15" style={{ backgroundColor: toneColorMap[tone] }} />;
 }
 
+function HeaderClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 500);
+    return () => window.clearInterval(id);
+  }, []);
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  const isBlinkOn = now.getMilliseconds() < 500;
+  const padded = (value: number) => value.toString().padStart(2, "0");
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const displayHours = ((hours + 11) % 12) + 1;
+  const label = `${padded(displayHours)}:${padded(minutes)} ${suffix}`;
+  return (
+    <time
+      dateTime={now.toISOString()}
+      aria-label={`Current time ${label}`}
+      className="inline-flex items-baseline gap-2 font-serif leading-none"
+      style={{ fontVariantNumeric: "tabular-nums" }}
+    >
+      <span className="inline-flex items-baseline text-[22px] tracking-tight text-black">
+        <span>{padded(displayHours)}</span>
+        <span
+          aria-hidden="true"
+          className="mx-[2px] transition-opacity duration-150"
+          style={{ opacity: isBlinkOn ? 1 : 0.15 }}
+        >
+          :
+        </span>
+        <span>{padded(minutes)}</span>
+        <span className="ml-1 text-[11px] uppercase tracking-[0.22em] text-black/55">{suffix}</span>
+      </span>
+      <span className="text-[10px] uppercase tracking-[0.24em] text-black/40" style={{ fontFamily: "system-ui" }}>
+        :{padded(seconds)}
+      </span>
+    </time>
+  );
+}
+
 function ColorPalette({
   value,
   onChange,
@@ -171,6 +211,8 @@ function HelpPanel({
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Act on selected task</div>
         <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">⇧⌘D</span></div>
         <div className="flex items-center justify-between gap-3"><span>delete</span><span className="font-semibold">⇧⌘⌫</span></div>
+        <div className="flex items-center justify-between gap-3"><span>activate hovered task (tunnel)</span><span className="font-semibold">⇧⌘A</span></div>
+        <div className="flex items-center justify-between gap-3"><span>exit active task</span><span className="font-semibold">Esc</span></div>
         <div className="flex items-center justify-between gap-3"><span>undo last action (after Esc)</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view, after Esc)</div>
@@ -275,6 +317,8 @@ export default function Home() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [completingItemId, setCompletingItemId] = useState<string | null>(null);
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectTone, setNewProjectTone] = useState<ProjectTone>("moss");
@@ -581,6 +625,11 @@ export default function Home() {
       if (event.key === "Escape") {
         event.preventDefault();
 
+        if (activeItemId) {
+          setActiveItemId(null);
+          return;
+        }
+
         if (isEditingField(document.activeElement)) {
           setShowHelp(false);
           setEditItemId(null);
@@ -595,6 +644,17 @@ export default function Home() {
       }
 
       const usesShortcutModifier = (event.metaKey || event.ctrlKey) && event.shiftKey;
+      if (usesShortcutModifier && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        const targetId = hoveredItemId ?? selectedRow?.item.id ?? null;
+        if (targetId) {
+          setActiveItemId(targetId);
+          setEditItemId(null);
+          setMenuItemId(null);
+          blurActiveElement();
+        }
+        return;
+      }
       if (usesShortcutModifier && selectedRow && event.key.toLowerCase() === "d") {
         event.preventDefault();
         void markDone(selectedRow.item.id);
@@ -655,15 +715,11 @@ export default function Home() {
       }
 
       if (event.key === "Enter") {
-        event.preventDefault();
-
         if (grabbedItemId && grabbedItemId !== selectedRow.item.id && listMode === "today") {
+          event.preventDefault();
           void applyMove(grabbedItemId, selectedRow.item.id, event.shiftKey ? "after" : "chain");
           return;
         }
-
-        navigate(`/due/${selectedRow.item.id}`);
-        return;
       }
 
       if (event.key === "z" || event.key === "Z" || event.key === "u" || event.key === "U") {
@@ -677,7 +733,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow, editItemId, rescheduleItemId]);
+  }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow, editItemId, rescheduleItemId, activeItemId, hoveredItemId]);
 
   if (!hero.authChecked) {
     return <main className="min-h-screen bg-[#f6f6f3]" />;
@@ -689,13 +745,18 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-3 py-3 text-black sm:px-4">
+      {activeItemId ? <div className="hero-tunnel-backdrop" aria-hidden="true" /> : null}
 <div className="mx-auto max-w-5xl">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
-          <header className="border-b border-black px-3 py-3 sm:px-4">
+          <header className={`border-b border-black px-3 py-3 sm:px-4 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
               <div className="relative flex flex-wrap items-center justify-between gap-3">
-	              <div className="flex items-center gap-3 text-sm font-semibold">
-	                <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
-	                <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+	              <div className="flex items-center gap-4 text-sm font-semibold">
+	                <div className="flex items-center gap-3">
+	                  <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
+	                  <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+	                </div>
+	                <span className="hidden h-6 w-px bg-black/15 sm:inline-block" aria-hidden="true" />
+	                <HeaderClock />
 	              </div>
 
 
@@ -905,16 +966,29 @@ export default function Home() {
               const isSelected = hero.selectedId === row.item.id && !captureFocused;
               const isEditingRow = editItemId === row.item.id;
               const isCompletingRow = completingItemId === row.item.id;
+              const isActiveRow = activeItemId === row.item.id;
+              const isDimmed = Boolean(activeItemId) && !isActiveRow;
+              const isPastDue = new Date(row.item.dueAt).getTime() < Date.now();
               const project = projectById.get(resolveProjectId(row.item.projectId));
               const projectName = project?.name ?? null;
               const projectTone = project?.tone ?? "ink";
               const canDrop = Boolean((draggedItemId || grabbedItemId) && row.item.id !== draggedItemId && row.item.id !== grabbedItemId);
               const sourceId = draggedItemId || grabbedItemId;
               const actionsDimmed = isTyping && !isEditingRow;
-              const rowClass = `${isSelected ? "bg-black/[0.035]" : "bg-white"} ${isCompletingRow ? "hero-row-completing" : ""}`.trim();
+              const rowClass = [
+                isSelected ? "bg-black/[0.035]" : "bg-white",
+                isCompletingRow ? "hero-row-completing" : "",
+                isActiveRow ? "hero-tunnel-active" : "",
+                isDimmed ? "hero-tunnel-dim" : "",
+              ].filter(Boolean).join(" ");
 
               return (
-                <article key={row.item.id} className={rowClass}>
+                <article
+                  key={row.item.id}
+                  className={rowClass}
+                  onMouseEnter={() => setHoveredItemId(row.item.id)}
+                  onMouseLeave={() => setHoveredItemId((current) => (current === row.item.id ? null : current))}
+                >
                   <div className="grid grid-cols-[92px_minmax(0,1fr)_auto] items-start gap-2 px-3 py-3 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:px-4">
                       <button
                         type="button"
@@ -924,7 +998,7 @@ export default function Home() {
                           }
                         }}
                         onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
-                        className="pt-1 text-left text-[11px] leading-5 text-black/58 sm:text-xs"
+                        className={`pt-1 text-left text-[11px] leading-5 sm:text-xs ${isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
                       >
 
                       {dueLabelForList(row.item.dueAt)}
@@ -1077,7 +1151,7 @@ export default function Home() {
                                 {grabbedItemId === row.item.id ? "Cancel move" : "Move"}
                               </button>
                             ) : null}
-                            <button type="button" onClick={() => navigate(`/due/${row.item.id}`)} className="border border-black px-2 py-1">
+                            <button type="button" onClick={() => setActiveItemId(row.item.id)} className="border border-black px-2 py-1">
                               Focus
                             </button>
                           </div>
@@ -1149,30 +1223,34 @@ export default function Home() {
             ) : null}
           </div>
 
-          <footer className="border-t border-black px-3 py-3 sm:px-4">
+          <footer className={`border-t border-black px-3 py-3 sm:px-4 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
             <div className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black">
-              {grabbedItemId
-                ? "Move mode"
-                : rescheduleItemId
-                  ? "Rescheduling task"
-                  : editItemId
-                    ? "Editing task"
-                    : captureFocused
-                      ? "Typing new task"
-                      : hero.selectedId
-                        ? "Navigating task list"
-                        : "Idle"}
+              {activeItemId
+                ? "Task active"
+                : grabbedItemId
+                  ? "Move mode"
+                  : rescheduleItemId
+                    ? "Rescheduling task"
+                    : editItemId
+                      ? "Editing task"
+                      : captureFocused
+                        ? "Typing new task"
+                        : hero.selectedId
+                          ? "Navigating task list"
+                          : "Idle"}
             </div>
             <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-black/48">
-              {grabbedItemId
-                ? "Drop under a task to create a chain, or drop after to reorder it."
-                : rescheduleItemId
-                  ? "Type a new wake-up time · Enter saves · Escape cancels."
-                  : editItemId
-                    ? "Enter saves · Escape exits edit · ↑ / ↓ move to the next task · ⇧⌘D to mark done · ⇧⌘⌫ to delete."
-                    : captureFocused
-                      ? "Enter saves · Escape clears focus · ↓ jumps into the first task."
-                      : "Press T for a new task · ↑ / ↓ edit as you browse · Escape returns to shortcuts · ? for help."}
+              {activeItemId
+                ? "Everything else is dimmed · Press Escape to exit."
+                : grabbedItemId
+                  ? "Drop under a task to create a chain, or drop after to reorder it."
+                  : rescheduleItemId
+                    ? "Type a new wake-up time · Enter saves · Escape cancels."
+                    : editItemId
+                      ? "Enter saves · Escape exits edit · ↑ / ↓ move to the next task · ⇧⌘D to mark done · ⇧⌘⌫ to delete."
+                      : captureFocused
+                        ? "Enter saves · Escape clears focus · ↓ jumps into the first task."
+                        : "Press T for a new task · ↑ / ↓ edit as you browse · ⇧⌘A to activate the hovered task · Escape returns to shortcuts · ? for help."}
             </div>
           </footer>
         </section>

@@ -10,7 +10,6 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Analytics from "./pages/Analytics";
 import Done from "./pages/Done";
-import Due from "./pages/Due";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
 
@@ -20,7 +19,6 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/all" component={Home} />
       <Route path="/analytics" component={Analytics} />
-      <Route path="/due/:id" component={Due} />
       <Route path="/done" component={Done} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
