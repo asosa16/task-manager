@@ -5,6 +5,7 @@ Design note for this file:
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
 */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
@@ -317,6 +318,8 @@ export default function Home() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [completingItemId, setCompletingItemId] = useState<string | null>(null);
+  const [holdingDoneItemId, setHoldingDoneItemId] = useState<string | null>(null);
+  const [confettiBursts, setConfettiBursts] = useState<Array<{ id: string; x: number; y: number }>>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
@@ -326,6 +329,8 @@ export default function Home() {
   const captureProjectRef = useRef<HTMLSelectElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const hasAutoFocusedCaptureRef = useRef(false);
+  const doneButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const holdDoneTimerRef = useRef<number | null>(null);
 
   const filteredItems = useMemo(
     () => (listMode === "today" ? hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt)) : hero.upcomingItems),
@@ -547,11 +552,47 @@ export default function Home() {
     setPendingDefaultCapture(false);
   }
 
+  function cancelHoldDone() {
+    if (holdDoneTimerRef.current !== null) {
+      window.clearTimeout(holdDoneTimerRef.current);
+      holdDoneTimerRef.current = null;
+    }
+    setHoldingDoneItemId(null);
+  }
+
+  function startHoldDone(itemId: string) {
+    if (holdDoneTimerRef.current !== null) return;
+    setHoldingDoneItemId(itemId);
+    holdDoneTimerRef.current = window.setTimeout(() => {
+      holdDoneTimerRef.current = null;
+      setHoldingDoneItemId(null);
+      void markDone(itemId);
+    }, 1000);
+  }
+
+  function spawnConfettiBurst(itemId: string) {
+    const btn = doneButtonRefs.current.get(itemId);
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+    const burst = {
+      id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+    setConfettiBursts((prev) => [...prev, burst]);
+    window.setTimeout(() => {
+      setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
+    }, 800);
+  }
+
   async function markDone(itemId: string) {
+    cancelHoldDone();
     if (editItemId === itemId) {
       setEditItemId(null);
       blurActiveElement();
     }
+    spawnConfettiBurst(itemId);
     setCompletingItemId(itemId);
     const [result] = await Promise.all([
       hero.markDone(itemId),
@@ -659,7 +700,9 @@ export default function Home() {
       }
       if (usesShortcutModifier && selectedRow && event.key.toLowerCase() === "d") {
         event.preventDefault();
-        void markDone(selectedRow.item.id);
+        if (!event.repeat) {
+          startHoldDone(selectedRow.item.id);
+        }
         return;
       }
       if (usesShortcutModifier && selectedRow && (event.key === "Backspace" || event.key === "Delete")) {
@@ -736,6 +779,25 @@ export default function Home() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow, editItemId, rescheduleItemId, activeItemId, hoveredItemId]);
+
+  useEffect(() => {
+    function onKeyUp(event: KeyboardEvent) {
+      if (holdDoneTimerRef.current === null) return;
+      const key = event.key.toLowerCase();
+      if (key === "shift" || key === "meta" || key === "control" || key === "d") {
+        cancelHoldDone();
+      }
+    }
+    function onBlur() {
+      cancelHoldDone();
+    }
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   if (!hero.authChecked) {
     return <main className="min-h-screen bg-[#f6f6f3]" />;
@@ -981,6 +1043,7 @@ export default function Home() {
               const isSelected = hero.selectedId === row.item.id && !captureFocused;
               const isEditingRow = editItemId === row.item.id;
               const isCompletingRow = completingItemId === row.item.id;
+              const isHoldingDoneRow = holdingDoneItemId === row.item.id;
               const isActiveRow = activeItemId === row.item.id;
               const isDimmed = Boolean(activeItemId) && !isActiveRow;
               const isPastDue = new Date(row.item.dueAt).getTime() < Date.now();
@@ -993,6 +1056,7 @@ export default function Home() {
               const rowClass = [
                 isSelected ? "bg-black/[0.035]" : "bg-white",
                 isCompletingRow ? "hero-row-completing" : "",
+                isHoldingDoneRow ? "hero-row-holding-done" : "",
                 isActiveRow ? "hero-tunnel-active" : "",
                 isDimmed ? "hero-tunnel-dim" : "",
               ].filter(Boolean).join(" ");
@@ -1198,14 +1262,13 @@ export default function Home() {
                       ) : null}
                     </div>
 
-                    <div className={`relative flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
-                      {isCompletingRow ? (
-                        <span className="hero-done-confetti" aria-hidden="true">
-                          <span /><span /><span /><span /><span /><span /><span /><span />
-                        </span>
-                      ) : null}
+                    <div className={`flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
                       <button
                         type="button"
+                        ref={(el) => {
+                          if (el) doneButtonRefs.current.set(row.item.id, el);
+                          else doneButtonRefs.current.delete(row.item.id);
+                        }}
                         disabled={actionsDimmed || isCompletingRow}
                         onClick={() => void markDone(row.item.id)}
                         className="inline-flex h-9 w-9 items-center justify-center gap-1 border border-black/22 px-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed sm:w-auto sm:min-w-[74px] sm:px-2"
@@ -1280,6 +1343,22 @@ export default function Home() {
           </footer>
         </section>
       </div>
+      {confettiBursts.length
+        ? createPortal(
+            <div className="hero-confetti-layer" aria-hidden="true">
+              {confettiBursts.map((burst) => (
+                <span
+                  key={burst.id}
+                  className="hero-done-confetti"
+                  style={{ left: `${burst.x}px`, top: `${burst.y}px` }}
+                >
+                  <span /><span /><span /><span /><span /><span /><span /><span />
+                </span>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </main>
   );
 }
