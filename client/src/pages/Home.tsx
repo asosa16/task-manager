@@ -106,6 +106,42 @@ function ProjectDot({ tone }: { tone: ProjectTone }) {
   return <span className="inline-block h-2.5 w-2.5 rounded-full border border-black/15" style={{ backgroundColor: toneColorMap[tone] }} />;
 }
 
+function ColorPalette({
+  value,
+  onChange,
+  size = "md",
+}: {
+  value: ProjectTone;
+  onChange: (tone: ProjectTone) => void;
+  size?: "sm" | "md";
+}) {
+  const dimension = size === "sm" ? "h-6 w-6" : "h-7 w-7";
+  return (
+    <div className="flex items-center gap-2" role="radiogroup" aria-label="Project color">
+      {projectToneOptions.map((tone) => {
+        const selected = tone === value;
+        return (
+          <button
+            key={tone}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(tone)}
+            aria-label={toneLabelMap[tone]}
+            title={toneLabelMap[tone]}
+            className={`${dimension} rounded-full border transition ${
+              selected
+                ? "border-black ring-2 ring-offset-2 ring-black/25"
+                : "border-black/20 hover:border-black/60"
+            }`}
+            style={{ backgroundColor: toneColorMap[tone] }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function HelpPanel({
   onClose,
   onSignOut,
@@ -718,7 +754,7 @@ export default function Home() {
                       const draft = projectDrafts[project.id] ?? { name: project.name, tone: project.tone };
                       const isDefault = hero.defaultProjectId === project.id;
                       return (
-                        <div key={project.id} className="grid gap-2 border-b border-black/8 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[auto_minmax(0,1fr)_150px_auto] sm:items-center">
+                        <div key={project.id} className="grid gap-2 border-b border-black/8 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center">
                           <label className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-black/58">
                             <input type="radio" name="default-project" checked={isDefault} onChange={() => void setDefaultProject(project.id)} />
                             <span>Default</span>
@@ -736,22 +772,15 @@ export default function Home() {
                               className="min-w-0 flex-1 bg-transparent text-sm outline-none"
                             />
                           </label>
-                          <select
+                          <ColorPalette
                             value={draft.tone}
-                            onChange={(event) =>
+                            onChange={(tone) =>
                               setProjectDrafts((current) => ({
                                 ...current,
-                                [project.id]: { ...draft, tone: event.target.value as ProjectTone },
+                                [project.id]: { ...draft, tone },
                               }))
                             }
-                            className="min-h-10 border border-black/12 bg-white px-3 text-sm outline-none"
-                          >
-                            {projectToneOptions.map((tone) => (
-                              <option key={tone} value={tone}>
-                                {toneLabelMap[tone]}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <button type="button" onClick={() => void submitProjectUpdate(project.id)} className="min-h-10 border border-black px-3 text-xs font-semibold uppercase tracking-[0.14em]">
                             Save
                           </button>
@@ -760,24 +789,14 @@ export default function Home() {
                     })}
                   </div>
 
-                  <form onSubmit={submitProjectCreate} className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_150px_auto]">
+                  <form onSubmit={submitProjectCreate} className="mt-4 grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                     <input
                       value={newProjectName}
                       onChange={(event) => setNewProjectName(event.target.value)}
                       placeholder="Add a project"
                       className="min-h-10 border border-black bg-white px-3 text-sm outline-none"
                     />
-                    <select
-                      value={newProjectTone}
-                      onChange={(event) => setNewProjectTone(event.target.value as ProjectTone)}
-                      className="min-h-10 border border-black bg-white px-3 text-sm outline-none"
-                    >
-                      {projectToneOptions.map((tone) => (
-                        <option key={tone} value={tone}>
-                          {toneLabelMap[tone]}
-                        </option>
-                      ))}
-                    </select>
+                    <ColorPalette value={newProjectTone} onChange={setNewProjectTone} />
                     <button type="submit" className="min-h-10 border border-black bg-black px-4 text-xs font-semibold uppercase tracking-[0.16em] text-white">
                       Add project
                     </button>
