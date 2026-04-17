@@ -1115,12 +1115,31 @@ export default function Home() {
             ) : null}
           </div>
 
-          <footer className="border-t border-black px-3 py-3 text-[11px] uppercase tracking-[0.14em] text-black/48 sm:px-4">
-            {grabbedItemId
-              ? "Move mode is active. Drop under a task to create a chain, or drop after to reorder it."
-              : isTyping
-                ? "Typing · Enter saves, Escape exits, ↑ / ↓ jump to the next task in edit mode."
-                : "Press T for a new task · ↑ / ↓ edit as you browse · Escape returns to shortcuts · ? for help."}
+          <footer className="border-t border-black px-3 py-3 sm:px-4">
+            <div className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black">
+              {grabbedItemId
+                ? "Move mode"
+                : rescheduleItemId
+                  ? "Rescheduling task"
+                  : editItemId
+                    ? "Editing task"
+                    : captureFocused
+                      ? "Typing new task"
+                      : hero.selectedId
+                        ? "Navigating task list"
+                        : "Idle"}
+            </div>
+            <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-black/48">
+              {grabbedItemId
+                ? "Drop under a task to create a chain, or drop after to reorder it."
+                : rescheduleItemId
+                  ? "Type a new wake-up time · Enter saves · Escape cancels."
+                  : editItemId
+                    ? "Enter saves · Escape exits edit · ↑ / ↓ move to the next task · ⇧⌘D to mark done · ⇧⌘⌫ to delete."
+                    : captureFocused
+                      ? "Enter saves · Escape clears focus · ↓ jumps into the first task."
+                      : "Press T for a new task · ↑ / ↓ edit as you browse · Escape returns to shortcuts · ? for help."}
+            </div>
           </footer>
         </section>
       </div>
