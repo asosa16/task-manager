@@ -226,6 +226,7 @@ export default function Home() {
   const [captureInput, setCaptureInput] = useState("");
   const [captureProjectId, setCaptureProjectId] = useState("");
   const [captureFocused, setCaptureFocused] = useState(false);
+  const [pendingDefaultCapture, setPendingDefaultCapture] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
@@ -427,19 +428,43 @@ export default function Home() {
 
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    const result = await hero.saveDraft({
-      title: "",
-      dueInput: "",
-      captureInput,
-      type: "task",
-      projectId: captureProjectId || fallbackProjectId || undefined,
-    });
+    const trimmed = captureInput.trim();
+    if (!trimmed) return;
+
+    const parsed = parseCaptureInput(trimmed);
+    const projectId = captureProjectId || fallbackProjectId || undefined;
+
+    let result;
+    if (parsed) {
+      result = await hero.saveDraft({
+        title: "",
+        dueInput: "",
+        captureInput: trimmed,
+        type: "task",
+        projectId,
+      });
+    } else {
+      if (!pendingDefaultCapture) {
+        setPendingDefaultCapture(true);
+        toast("No wake-up time detected. Press Enter again to use default (tomorrow 8am).", {
+          duration: 6000,
+        });
+        return;
+      }
+      result = await hero.saveDraft({
+        title: trimmed,
+        dueInput: "tomorrow 8am",
+        type: "task",
+        projectId,
+      });
+    }
 
     if (!result.ok) return toast.error(result.message);
     showActionToast(result.message);
     setCaptureInput("");
     setCaptureProjectId(fallbackProjectId);
     setSelectionDismissed(false);
+    setPendingDefaultCapture(false);
   }
 
   async function markDone(itemId: string) {
@@ -769,7 +794,10 @@ export default function Home() {
                 value={captureInput}
                 onFocus={() => setCaptureFocused(true)}
                 onBlur={() => setCaptureFocused(false)}
-                onChange={(event) => setCaptureInput(event.target.value)}
+                onChange={(event) => {
+                  setCaptureInput(event.target.value);
+                  if (pendingDefaultCapture) setPendingDefaultCapture(false);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     event.preventDefault();
@@ -830,7 +858,9 @@ export default function Home() {
             <div className="mt-2 flex flex-col gap-1 text-xs text-black/68 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 {captureInput.trim()
-                  ? capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am”."
+                  ? pendingDefaultCapture
+                    ? "No wake-up time detected. Press Enter again to save with tomorrow 8am."
+                    : capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am” — or press Enter twice to use tomorrow 8am."
                   : "One line only: task name plus wake-up time."}
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -843,6 +873,10 @@ export default function Home() {
             {parsedCapture ? (
               <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-black/52">
                 Saving as “{parsedCapture.title}”
+              </div>
+            ) : pendingDefaultCapture && captureInput.trim() ? (
+              <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-amber-700">
+                Press Enter again → “{captureInput.trim()}” · tomorrow 8am
               </div>
             ) : null}
           </header>
