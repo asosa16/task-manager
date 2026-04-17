@@ -124,14 +124,14 @@ function HelpPanel({
       <div className="mt-3 space-y-2 text-black/72">
         <div className="flex items-center justify-between gap-3"><span>save from the input</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>move between Today / All / Done</span><span className="font-semibold">Tab</span></div>
-        <div className="flex items-center justify-between gap-3"><span>move focus</span><span className="font-semibold">↑ / ↓</span></div>
-        <div className="flex items-center justify-between gap-3"><span>jump back to new task</span><span className="font-semibold">Shift + N</span></div>
+        <div className="flex items-center justify-between gap-3"><span>edit and move through list</span><span className="font-semibold">↑ / ↓</span></div>
+        <div className="flex items-center justify-between gap-3"><span>exit edit, keep selection</span><span className="font-semibold">Esc</span></div>
+        <div className="flex items-center justify-between gap-3"><span>new task input</span><span className="font-semibold">T</span></div>
         <div className="flex items-center justify-between gap-3"><span>pick up selected task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop under selected task</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after selected task</span><span className="font-semibold">Shift + Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>mark selected done</span><span className="font-semibold">D</span></div>
         <div className="flex items-center justify-between gap-3"><span>delete selected task</span><span className="font-semibold">Delete</span></div>
-        <div className="flex items-center justify-between gap-3"><span>edit selected task</span><span className="font-semibold">Shift + E</span></div>
         <div className="flex items-center justify-between gap-3"><span>toggle this panel</span><span className="font-semibold">?</span></div>
       </div>
       <button
@@ -214,6 +214,7 @@ export default function Home() {
 
   const [captureInput, setCaptureInput] = useState("");
   const [captureProjectId, setCaptureProjectId] = useState("");
+  const [captureFocused, setCaptureFocused] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
@@ -226,6 +227,7 @@ export default function Home() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [completionFlashTitle, setCompletionFlashTitle] = useState<string | null>(null);
+  const [completingItemId, setCompletingItemId] = useState<string | null>(null);
   const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectTone, setNewProjectTone] = useState<ProjectTone>("moss");
@@ -246,6 +248,9 @@ export default function Home() {
   const selectedRow = selectedIndex >= 0 ? displayRows[selectedIndex] : displayRows[0] ?? null;
   const capturePreview = useMemo(() => previewCaptureInput(captureInput), [captureInput]);
   const parsedCapture = useMemo(() => parseCaptureInput(captureInput), [captureInput]);
+  const editParsed = useMemo(() => (editItemId ? parseCaptureInput(editValue) : null), [editItemId, editValue]);
+  const editPreview = useMemo(() => (editItemId ? previewCaptureInput(editValue) : ""), [editItemId, editValue]);
+  const isTyping = editItemId !== null || rescheduleItemId !== null || captureFocused;
 
   function showActionToast(message: string) {
     toast.success(`${message} Press Z to undo.`);
@@ -255,13 +260,14 @@ export default function Home() {
     return projectId ?? fallbackProjectId;
   }
 
-  function beginItemEdit(item: HeroItem) {
+  function beginItemEdit(item: HeroItem, options?: { openMenu?: boolean }) {
     setSelectionDismissed(false);
-    setMenuItemId(item.id);
+    if (options?.openMenu) setMenuItemId(item.id);
     setRescheduleItemId(null);
     setEditItemId(item.id);
     setEditValue(item.title);
     setEditProjectId(resolveProjectId(item.projectId));
+    hero.setSelectedId(item.id);
   }
 
   function isComposerFocusTarget(target: EventTarget | null) {
@@ -298,11 +304,40 @@ export default function Home() {
     navigate(getPrimaryRouteTarget(location, direction));
   }
 
-  function moveSelection(direction: 1 | -1) {
+  function moveSelection(direction: 1 | -1, options?: { enterEdit?: boolean }) {
     if (!displayRows.length) return;
     const baseIndex = selectedIndex >= 0 ? selectedIndex : 0;
     const next = displayRows[Math.min(Math.max(baseIndex + direction, 0), displayRows.length - 1)] ?? selectedRow;
-    if (next) selectItem(next.item.id, { fromListNavigation: true });
+    if (!next) return;
+    selectItem(next.item.id, { fromListNavigation: true });
+    if (options?.enterEdit) {
+      beginItemEdit(next.item);
+    }
+  }
+
+  async function commitInlineEditIfNeeded() {
+    if (!editItemId) return;
+    const itemId = editItemId;
+    const target = hero.items.find((item) => item.id === itemId);
+    const trimmed = editValue.trim();
+    if (!target || !trimmed) return;
+    const parsed = parseCaptureInput(trimmed);
+    const titleChanged = (parsed ? parsed.title : trimmed) !== target.title;
+    const dueChanged = parsed && parsed.dueAt !== target.dueAt;
+    const projectChanged = (editProjectId || fallbackProjectId) !== resolveProjectId(target.projectId);
+    if (!titleChanged && !dueChanged && !projectChanged) return;
+    const result = await hero.editCapture(itemId, trimmed, editProjectId || fallbackProjectId || undefined);
+    if (!result.ok) {
+      toast.error(result.message);
+      return;
+    }
+    showActionToast(result.message);
+  }
+
+  function exitInlineEdit() {
+    setEditItemId(null);
+    setRescheduleItemId(null);
+    blurActiveElement();
   }
 
   function dismissFocusState() {
@@ -334,7 +369,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!completionFlashTitle) return undefined;
-    const timer = window.setTimeout(() => setCompletionFlashTitle(null), 900);
+    const timer = window.setTimeout(() => setCompletionFlashTitle(null), 1400);
     return () => window.clearTimeout(timer);
   }, [completionFlashTitle]);
 
@@ -402,7 +437,14 @@ export default function Home() {
 
   async function markDone(itemId: string) {
     const target = hero.items.find((item) => item.id === itemId);
+    if (editItemId === itemId) {
+      setEditItemId(null);
+      blurActiveElement();
+    }
+    setCompletingItemId(itemId);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 520));
     const result = await hero.markDone(itemId);
+    setCompletingItemId(null);
     if (!result.ok) return toast.error(result.message);
     setCompletionFlashTitle(target?.title ?? "Done");
     showActionToast(result.message);
@@ -423,9 +465,11 @@ export default function Home() {
   }
 
   async function submitRename(itemId: string) {
-    const result = await hero.renameItem(itemId, editValue, editProjectId || fallbackProjectId || undefined);
+    const result = await hero.editCapture(itemId, editValue, editProjectId || fallbackProjectId || undefined);
     if (!result.ok) return toast.error(result.message);
-    showActionToast(result.message);
+    if (result.message !== "No changes.") {
+      showActionToast(result.message);
+    }
     setEditItemId(null);
     setMenuItemId(null);
     blurActiveElement();
@@ -492,6 +536,12 @@ export default function Home() {
         return;
       }
 
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        focusCaptureComposer();
+        return;
+      }
+
       if (event.key === "Tab") {
         event.preventDefault();
         cyclePrimaryRoute(event.shiftKey ? -1 : 1);
@@ -508,13 +558,13 @@ export default function Home() {
 
       if (event.key === "j" || event.key === "J" || event.key === "ArrowDown") {
         event.preventDefault();
-        moveSelection(1);
+        moveSelection(1, { enterEdit: true });
         return;
       }
 
       if (event.key === "k" || event.key === "K" || event.key === "ArrowUp") {
         event.preventDefault();
-        moveSelection(-1);
+        moveSelection(-1, { enterEdit: true });
         return;
       }
 
@@ -580,14 +630,18 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-3 py-3 text-black sm:px-4">
       {completionFlashTitle ? (
-          <div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center px-3">
-            <div className="relative inline-flex items-center gap-3 overflow-hidden border border-emerald-700 bg-emerald-50 px-4 py-2 text-sm text-emerald-900 shadow-[0_10px_30px_rgba(22,101,52,0.18)]">
-              <span className="absolute left-2 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full bg-emerald-300/40 animate-ping" />
-              <span className="relative inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-sm font-semibold text-white">✓</span>
-              <span className="relative">Done: {completionFlashTitle}</span>
+        <div className="pointer-events-none fixed inset-x-0 top-5 z-40 flex justify-center px-3">
+          <div className="relative inline-flex items-center gap-3 overflow-hidden rounded-sm border border-emerald-700 bg-emerald-50 px-5 py-3 text-sm text-emerald-900 shadow-[0_14px_40px_rgba(22,101,52,0.24)]">
+            <span className="hero-done-burst absolute left-4 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full bg-emerald-300/55" />
+            <span className="hero-done-check-mark relative inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-700 text-base font-semibold text-white">
+              ✓
+            </span>
+            <div className="relative flex flex-col leading-tight">
+              <span className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Nice work</span>
+              <span className="text-[15px] font-medium">{completionFlashTitle}</span>
             </div>
           </div>
-
+        </div>
       ) : null}
       <div className="mx-auto max-w-5xl">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
@@ -728,6 +782,8 @@ export default function Home() {
               <input
                 ref={captureInputRef}
                 value={captureInput}
+                onFocus={() => setCaptureFocused(true)}
+                onBlur={() => setCaptureFocused(false)}
                 onChange={(event) => setCaptureInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
@@ -742,12 +798,20 @@ export default function Home() {
                   }
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    moveSelection(1);
+                    if (displayRows.length) {
+                      const target = selectedRow?.item ?? displayRows[0].item;
+                      selectItem(target.id, { fromListNavigation: true });
+                      beginItemEdit(target);
+                    }
                     return;
                   }
                   if (event.key === "ArrowUp") {
                     event.preventDefault();
-                    moveSelection(-1);
+                    if (displayRows.length) {
+                      const target = selectedRow?.item ?? displayRows[displayRows.length - 1].item;
+                      selectItem(target.id, { fromListNavigation: true });
+                      beginItemEdit(target);
+                    }
                     return;
                   }
                   if (event.key === "?" && captureInput.trim() === "") {
@@ -801,14 +865,18 @@ export default function Home() {
           <div className="divide-y divide-black/10">
             {displayRows.map((row) => {
               const isSelected = hero.selectedId === row.item.id;
+              const isEditingRow = editItemId === row.item.id;
+              const isCompletingRow = completingItemId === row.item.id;
               const project = projectById.get(resolveProjectId(row.item.projectId));
               const projectName = project?.name ?? null;
               const projectTone = project?.tone ?? "ink";
               const canDrop = Boolean((draggedItemId || grabbedItemId) && row.item.id !== draggedItemId && row.item.id !== grabbedItemId);
               const sourceId = draggedItemId || grabbedItemId;
+              const actionsDimmed = isTyping && !isEditingRow;
+              const rowClass = `${isSelected ? "bg-black/[0.035]" : "bg-white"} ${isCompletingRow ? "hero-row-completing" : ""}`.trim();
 
               return (
-                <article key={row.item.id} className={isSelected ? "bg-black/[0.035]" : "bg-white"}>
+                <article key={row.item.id} className={rowClass}>
                   <div className="grid grid-cols-[92px_minmax(0,1fr)_auto] items-start gap-2 px-3 py-3 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:px-4">
                       <button
                         type="button"
@@ -825,78 +893,102 @@ export default function Home() {
                     </button>
 
                     <div className="min-w-0">
-                      <button
-                        type="button"
-                        draggable={listMode === "today"}
-                        onMouseEnter={() => {
-                          if (!editItemId && !rescheduleItemId) {
-                            selectItem(row.item.id, { fromListNavigation: true });
-                          }
-                        }}
-                        onDragStart={() => setDraggedItemId(row.item.id)}
-                        onDragEnd={() => setDraggedItemId(null)}
-                        onDragOver={(event) => {
-                          if (!canDrop || listMode !== "today") return;
-                          event.preventDefault();
-                        }}
-                        onDrop={(event) => {
-                          if (!sourceId || listMode !== "today") return;
-                          event.preventDefault();
-                          void applyMove(sourceId, row.item.id, "chain");
-                        }}
-                        onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
-                        onDoubleClick={() => navigate(`/due/${row.item.id}`)}
-                        className="flex w-full items-start gap-3 text-left"
-                      >
-                        <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
-                          {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
-                          <ProjectDot tone={projectTone} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
-                          {projectName ? <span className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-black/45">{projectName}</span> : null}
-                        </span>
-                      </button>
+                      {isEditingRow ? (
+                        <div className="flex w-full items-start gap-3">
+                          <span className="mt-[9px] flex items-center gap-2 text-[10px] text-black/38">
+                            {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
+                            <ProjectDot tone={projectTone} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <input
+                              ref={editInputRef}
+                              value={editValue}
+                              onChange={(event) => setEditValue(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void submitRename(row.item.id);
+                                  return;
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  setEditValue(row.item.title);
+                                  exitInlineEdit();
+                                  return;
+                                }
+                                if (event.key === "Tab") {
+                                  event.preventDefault();
+                                  cyclePrimaryRoute(event.shiftKey ? -1 : 1);
+                                  return;
+                                }
+                                if (event.key === "ArrowDown") {
+                                  event.preventDefault();
+                                  void commitInlineEditIfNeeded().then(() => moveSelection(1, { enterEdit: true }));
+                                  return;
+                                }
+                                if (event.key === "ArrowUp") {
+                                  event.preventDefault();
+                                  void commitInlineEditIfNeeded().then(() => moveSelection(-1, { enterEdit: true }));
+                                  return;
+                                }
+                              }}
+                              className="block w-full border border-emerald-700/60 bg-white px-2 py-1 text-[15px] leading-6 text-black outline-none focus:border-emerald-700"
+                            />
+                            <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-black/55">
+                              <span className="truncate">
+                                {editParsed ? `Will save as “${editParsed.title}” · ${editPreview}` : "Enter to save · Esc to exit edit · ↑/↓ to move"}
+                              </span>
+                              {projectName ? (
+                                <span className="uppercase tracking-[0.14em] text-black/45">{projectName}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          draggable={listMode === "today"}
+                          onMouseEnter={() => {
+                            if (!editItemId && !rescheduleItemId) {
+                              selectItem(row.item.id, { fromListNavigation: true });
+                            }
+                          }}
+                          onDragStart={() => setDraggedItemId(row.item.id)}
+                          onDragEnd={() => setDraggedItemId(null)}
+                          onDragOver={(event) => {
+                            if (!canDrop || listMode !== "today") return;
+                            event.preventDefault();
+                          }}
+                          onDrop={(event) => {
+                            if (!sourceId || listMode !== "today") return;
+                            event.preventDefault();
+                            void applyMove(sourceId, row.item.id, "chain");
+                          }}
+                          onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
+                          onDoubleClick={() => beginItemEdit(row.item)}
+                          className="flex w-full items-start gap-3 text-left"
+                        >
+                          <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
+                            {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
+                            <ProjectDot tone={projectTone} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="hero-title-text block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
+                            {projectName ? <span className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-black/45">{projectName}</span> : null}
+                          </span>
+                          {isCompletingRow ? (
+                            <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
+                              <span className="hero-done-burst absolute inset-0 rounded-full bg-emerald-400/60" />
+                              <span className="hero-done-check-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-bold shadow-[0_6px_18px_rgba(5,150,105,0.35)]">
+                                ✓
+                              </span>
+                            </span>
+                          ) : null}
+                        </button>
+                      )}
 
                       {menuItemId === row.item.id ? (
                         <div className="mt-2 border-l border-black/15 pl-6 text-xs text-black/72">
-                          {editItemId === row.item.id ? (
-                            <div className="flex flex-col gap-2 sm:flex-row">
-                              <input
-                                ref={editItemId === row.item.id ? editInputRef : undefined}
-                                autoFocus
-                                value={editValue}
-                                onChange={(event) => setEditValue(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    void submitRename(row.item.id);
-                                  }
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    setEditItemId(null);
-                                    blurActiveElement();
-                                  }
-                                }}
-                                className="min-h-10 flex-1 border border-black px-3 text-sm outline-none"
-                              />
-                              <select
-                                value={editProjectId}
-                                onChange={(event) => setEditProjectId(event.target.value)}
-                                className="min-h-10 border border-black px-3 text-sm outline-none"
-                              >
-                                {hero.projects.map((project) => (
-                                  <option key={project.id} value={project.id}>
-                                    {project.name}
-                                  </option>
-                                ))}
-                              </select>
-                              <button type="button" onClick={() => void submitRename(row.item.id)} className="min-h-10 border border-black px-3">
-                                Save
-                              </button>
-                            </div>
-                          ) : null}
-
                           {rescheduleItemId === row.item.id ? (
                             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                               <input
@@ -977,11 +1069,12 @@ export default function Home() {
                       ) : null}
                     </div>
 
-                    <div className="flex items-center gap-1 pl-1">
+                    <div className={`flex items-center gap-1 pl-1 transition-opacity ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
                       <button
                         type="button"
+                        disabled={actionsDimmed || isCompletingRow}
                         onClick={() => void markDone(row.item.id)}
-                        className="inline-flex h-9 min-w-[74px] items-center justify-center gap-1 border border-black/22 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                        className="inline-flex h-9 min-w-[74px] items-center justify-center gap-1 border border-black/22 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed"
                         aria-label="Mark task as done"
                         title="Mark task as done"
                       >
@@ -990,16 +1083,18 @@ export default function Home() {
                       </button>
                       <button
                         type="button"
+                        disabled={actionsDimmed}
                         onClick={() => void removeItem(row.item.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black"
+                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed"
                         aria-label="Delete task"
                       >
                         🗑
                       </button>
                       <button
                         type="button"
+                        disabled={actionsDimmed}
                         onClick={() => setMenuItemId((current) => (current === row.item.id ? null : row.item.id))}
-                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black"
+                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed"
                         aria-label="More actions"
                       >
                         …
@@ -1022,7 +1117,9 @@ export default function Home() {
           <footer className="border-t border-black px-3 py-3 text-[11px] uppercase tracking-[0.14em] text-black/48 sm:px-4">
             {grabbedItemId
               ? "Move mode is active. Drop under a task to create a chain, or drop after to reorder it."
-              : "Shortcuts stay hidden until you click ? or type ?. Press Escape to clear focus. Double-click a task to open the focus view."}
+              : isTyping
+                ? "Typing · Enter saves, Escape exits, ↑ / ↓ jump to the next task in edit mode."
+                : "Press T for a new task · ↑ / ↓ edit as you browse · Escape returns to shortcuts · ? for help."}
           </footer>
         </section>
       </div>

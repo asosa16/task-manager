@@ -1077,6 +1077,46 @@ export function useHeroApp() {
     [items, updateItem],
   );
 
+  const editCapture = useCallback(
+    async (itemId: string, rawInput: string, projectId?: string): Promise<MutationResult> => {
+      const trimmed = rawInput.trim();
+      if (!trimmed) return { ok: false, message: "Give the item a title first." };
+      const target = items.find((item) => item.id === itemId);
+      if (!target) return { ok: false, message: "Item not found." };
+
+      const parsed = parseCaptureInput(trimmed);
+      const resolvedProjectId =
+        sanitizeProjectId(projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined;
+
+      const patch: Partial<HeroItem> = { projectId: resolvedProjectId };
+      if (parsed) {
+        patch.title = parsed.title;
+        patch.dueAt = parsed.dueAt;
+      } else {
+        patch.title = trimmed;
+      }
+
+      const unchanged =
+        patch.title === target.title &&
+        (patch.dueAt ?? target.dueAt) === target.dueAt &&
+        (patch.projectId ?? target.projectId) === target.projectId;
+      if (unchanged) {
+        return { ok: true, message: "No changes." };
+      }
+
+      const result = await updateItem(itemId, patch);
+      if (!result.ok) return result;
+      setUndoState({ kind: "update", item: target });
+      return {
+        ok: true,
+        message: parsed && patch.dueAt !== target.dueAt
+          ? `Updated and rescheduled to ${formatDueLabel(patch.dueAt!)}.`
+          : "Item updated.",
+      };
+    },
+    [defaultProjectId, items, projects, updateItem],
+  );
+
   const markDone = useCallback(
     async (itemId: string): Promise<MutationResult> => {
       const target = items.find((item) => item.id === itemId);
@@ -1445,6 +1485,7 @@ export function useHeroApp() {
     setSelectedId,
     addProject,
     breakDownAndResnooze,
+    editCapture,
     formatPreviewFromInput,
     markDone,
     moveItem,

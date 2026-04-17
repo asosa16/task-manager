@@ -223,3 +223,72 @@ Design note for this file:
     }
   }
 }
+
+@keyframes hero-done-sweep {
+  0% {
+    background-color: rgba(16, 185, 129, 0);
+    transform: translateX(0);
+    opacity: 1;
+  }
+  15% {
+    background-color: rgba(16, 185, 129, 0.18);
+  }
+  60% {
+    background-color: rgba(16, 185, 129, 0.12);
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    background-color: rgba(16, 185, 129, 0);
+    transform: translateX(18px);
+    opacity: 0;
+  }
+}
+
+@keyframes hero-done-strike {
+  0% { transform: scaleX(0); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: scaleX(1); opacity: 1; }
+}
+
+@keyframes hero-done-check {
+  0% { transform: scale(0.2) rotate(-18deg); opacity: 0; }
+  40% { transform: scale(1.25) rotate(0deg); opacity: 1; }
+  70% { transform: scale(0.95) rotate(0deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes hero-done-burst {
+  0% { transform: scale(0.2); opacity: 0.6; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+.hero-row-completing {
+  animation: hero-done-sweep 620ms ease-out forwards;
+  position: relative;
+}
+
+.hero-row-completing .hero-title-text {
+  position: relative;
+  color: rgb(6, 95, 70);
+}
+
+.hero-row-completing .hero-title-text::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background-color: rgb(16, 185, 129);
+  transform-origin: left;
+  animation: hero-done-strike 480ms ease-out forwards;
+}
+
+.hero-done-check-mark {
+  animation: hero-done-check 520ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.hero-done-burst {
+  animation: hero-done-burst 620ms ease-out forwards;
+}
