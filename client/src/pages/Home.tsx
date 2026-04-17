@@ -868,7 +868,7 @@ export default function Home() {
 
           <div className="divide-y divide-black/10">
             {displayRows.map((row) => {
-              const isSelected = hero.selectedId === row.item.id;
+              const isSelected = hero.selectedId === row.item.id && !captureFocused;
               const isEditingRow = editItemId === row.item.id;
               const isCompletingRow = completingItemId === row.item.id;
               const project = projectById.get(resolveProjectId(row.item.projectId));
