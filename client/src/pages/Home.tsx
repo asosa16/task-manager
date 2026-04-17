@@ -122,17 +122,29 @@ function HelpPanel({
         </button>
       </div>
       <div className="mt-3 space-y-2 text-black/72">
-        <div className="flex items-center justify-between gap-3"><span>save from the input</span><span className="font-semibold">Enter</span></div>
-        <div className="flex items-center justify-between gap-3"><span>move between Today / All / Done</span><span className="font-semibold">Tab</span></div>
-        <div className="flex items-center justify-between gap-3"><span>edit and move through list</span><span className="font-semibold">↑ / ↓</span></div>
+        <div className="text-[10px] uppercase tracking-[0.16em] text-black/45">Capture</div>
+        <div className="flex items-center justify-between gap-3"><span>focus new task input</span><span className="font-semibold">T <span className="text-black/40">/ ⇧N</span></span></div>
+        <div className="flex items-center justify-between gap-3"><span>save the new task</span><span className="font-semibold">Enter</span></div>
+
+        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">List navigation</div>
+        <div className="flex items-center justify-between gap-3"><span>edit &amp; move through tasks</span><span className="font-semibold">↑ / ↓</span></div>
+        <div className="flex items-center justify-between gap-3"><span>save inline edit</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>exit edit, keep selection</span><span className="font-semibold">Esc</span></div>
-        <div className="flex items-center justify-between gap-3"><span>new task input</span><span className="font-semibold">T</span></div>
-        <div className="flex items-center justify-between gap-3"><span>pick up selected task</span><span className="font-semibold">Space</span></div>
-        <div className="flex items-center justify-between gap-3"><span>drop under selected task</span><span className="font-semibold">Enter</span></div>
-        <div className="flex items-center justify-between gap-3"><span>drop after selected task</span><span className="font-semibold">Shift + Enter</span></div>
-        <div className="flex items-center justify-between gap-3"><span>mark selected done</span><span className="font-semibold">D <span className="text-black/40">/ ⇧⌘D while typing</span></span></div>
-        <div className="flex items-center justify-between gap-3"><span>delete selected task</span><span className="font-semibold">Delete <span className="text-black/40">/ ⇧⌘⌫ while typing</span></span></div>
-        <div className="flex items-center justify-between gap-3"><span>toggle this panel</span><span className="font-semibold">?</span></div>
+        <div className="flex items-center justify-between gap-3"><span>re-enter edit on selected row</span><span className="font-semibold">⇧E</span></div>
+        <div className="flex items-center justify-between gap-3"><span>switch Today / All / Done</span><span className="font-semibold">Tab</span></div>
+
+        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Act on selected task</div>
+        <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">D <span className="text-black/40">/ ⇧⌘D while typing</span></span></div>
+        <div className="flex items-center justify-between gap-3"><span>delete</span><span className="font-semibold">⌫ <span className="text-black/40">/ ⇧⌘⌫ while typing</span></span></div>
+        <div className="flex items-center justify-between gap-3"><span>undo last action</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
+
+        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view)</div>
+        <div className="flex items-center justify-between gap-3"><span>pick up / drop the task</span><span className="font-semibold">Space</span></div>
+        <div className="flex items-center justify-between gap-3"><span>drop under another task</span><span className="font-semibold">Enter</span></div>
+        <div className="flex items-center justify-between gap-3"><span>drop after another task</span><span className="font-semibold">⇧Enter</span></div>
+
+        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Panels</div>
+        <div className="flex items-center justify-between gap-3"><span>toggle this help</span><span className="font-semibold">?</span></div>
       </div>
       <button
         type="button"
