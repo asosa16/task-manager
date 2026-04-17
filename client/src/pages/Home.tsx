@@ -553,8 +553,10 @@ export default function Home() {
       blurActiveElement();
     }
     setCompletingItemId(itemId);
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 520));
-    const result = await hero.markDone(itemId);
+    const [result] = await Promise.all([
+      hero.markDone(itemId),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 520)),
+    ]);
     setCompletingItemId(null);
     if (!result.ok) return toast.error(result.message);
     showActionToast(result.message);
@@ -879,6 +881,11 @@ export default function Home() {
                   if (pendingDefaultCapture) setPendingDefaultCapture(false);
                 }}
                 onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void submitCapture();
+                    return;
+                  }
                   if (event.key === "Escape") {
                     event.preventDefault();
                     dismissFocusState();
@@ -920,6 +927,12 @@ export default function Home() {
                   ref={captureProjectRef}
                   value={captureProjectId}
                   onChange={(event) => setCaptureProjectId(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void submitCapture();
+                    }
+                  }}
                   className="min-h-11 min-w-0 flex-1 border border-black bg-white px-3 text-sm outline-none sm:flex-auto"
                 >
                   {hero.projects.map((project) => (
@@ -1185,7 +1198,12 @@ export default function Home() {
                       ) : null}
                     </div>
 
-                    <div className={`flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
+                    <div className={`relative flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
+                      {isCompletingRow ? (
+                        <span className="hero-done-confetti" aria-hidden="true">
+                          <span /><span /><span /><span /><span /><span /><span /><span />
+                        </span>
+                      ) : null}
                       <button
                         type="button"
                         disabled={actionsDimmed || isCompletingRow}
