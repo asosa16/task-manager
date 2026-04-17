@@ -399,8 +399,11 @@ export default function Home() {
   useEffect(() => {
     if (!editItemId) return undefined;
     const timer = window.setTimeout(() => {
-      editInputRef.current?.focus();
-      editInputRef.current?.select();
+      const input = editInputRef.current;
+      if (!input) return;
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
     }, 0);
     return () => window.clearTimeout(timer);
   }, [editItemId]);
