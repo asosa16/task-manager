@@ -800,7 +800,20 @@ export default function Home() {
   }, []);
 
   if (!hero.authChecked) {
-    return <main className="min-h-screen bg-[#f6f6f3]" />;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f6f6f3] text-black/55">
+        <div
+          role="status"
+          aria-label="Loading Hero"
+          className="flex items-center gap-[10px] text-[11px] uppercase tracking-[0.18em]"
+        >
+          <span className="hero-initial-dot" />
+          <span className="hero-initial-dot" style={{ animationDelay: "0.15s" }} />
+          <span className="hero-initial-dot" style={{ animationDelay: "0.3s" }} />
+          <span>Hero</span>
+        </div>
+      </main>
+    );
   }
 
   if (!hero.user) {
