@@ -130,15 +130,14 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>edit &amp; move through tasks</span><span className="font-semibold">↑ / ↓</span></div>
         <div className="flex items-center justify-between gap-3"><span>save inline edit</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>exit edit, keep selection</span><span className="font-semibold">Esc</span></div>
-        <div className="flex items-center justify-between gap-3"><span>re-enter edit on selected row</span><span className="font-semibold">⇧E</span></div>
         <div className="flex items-center justify-between gap-3"><span>switch Today / All / Done</span><span className="font-semibold">Tab</span></div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Act on selected task</div>
-        <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">D <span className="text-black/40">/ ⇧⌘D while typing</span></span></div>
-        <div className="flex items-center justify-between gap-3"><span>delete</span><span className="font-semibold">⌫ <span className="text-black/40">/ ⇧⌘⌫ while typing</span></span></div>
-        <div className="flex items-center justify-between gap-3"><span>undo last action</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
+        <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">⇧⌘D</span></div>
+        <div className="flex items-center justify-between gap-3"><span>delete</span><span className="font-semibold">⇧⌘⌫</span></div>
+        <div className="flex items-center justify-between gap-3"><span>undo last action (after Esc)</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
 
-        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view)</div>
+        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view, after Esc)</div>
         <div className="flex items-center justify-between gap-3"><span>pick up / drop the task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop under another task</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after another task</span><span className="font-semibold">⇧Enter</span></div>
@@ -603,24 +602,6 @@ export default function Home() {
         }
 
         navigate(`/due/${selectedRow.item.id}`);
-        return;
-      }
-
-      if (event.key === "d" || event.key === "D") {
-        event.preventDefault();
-        void markDone(selectedRow.item.id);
-        return;
-      }
-
-      if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault();
-        void removeItem(selectedRow.item.id);
-        return;
-      }
-
-      if (event.shiftKey && event.key.toLowerCase() === "e") {
-        event.preventDefault();
-        beginItemEdit(selectedRow.item);
         return;
       }
 
