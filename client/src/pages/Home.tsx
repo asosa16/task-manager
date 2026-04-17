@@ -895,7 +895,7 @@ export default function Home() {
                     <div className="min-w-0">
                       {isEditingRow ? (
                         <div className="flex w-full items-start gap-3">
-                          <span className="mt-[9px] flex items-center gap-2 text-[10px] text-black/38">
+                          <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
                             {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
                             <ProjectDot tone={projectTone} />
                           </span>
@@ -932,16 +932,13 @@ export default function Home() {
                                   return;
                                 }
                               }}
-                              className="block w-full border border-emerald-700/60 bg-white px-2 py-1 text-[15px] leading-6 text-black outline-none focus:border-emerald-700"
+                              className="block w-full border-0 bg-transparent p-0 text-[15px] leading-6 text-black outline-none"
                             />
-                            <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-black/55">
-                              <span className="truncate">
-                                {editParsed ? `Will save as “${editParsed.title}” · ${editPreview}` : "Enter to save · Esc to exit edit · ↑/↓ to move"}
-                              </span>
-                              {projectName ? (
-                                <span className="uppercase tracking-[0.14em] text-black/45">{projectName}</span>
-                              ) : null}
-                            </div>
+                            {editParsed ? (
+                              <span className="mt-1 block text-[11px] text-black/45">Will save as “{editParsed.title}” · {editPreview}</span>
+                            ) : projectName ? (
+                              <span className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-black/45">{projectName}</span>
+                            ) : null}
                           </div>
                         </div>
                       ) : (
