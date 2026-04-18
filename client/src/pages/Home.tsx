@@ -306,6 +306,7 @@ export default function Home() {
   const [captureProjectId, setCaptureProjectId] = useState("");
   const [captureFocused, setCaptureFocused] = useState(false);
   const [pendingDefaultCapture, setPendingDefaultCapture] = useState(false);
+  const [captureSaving, setCaptureSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
@@ -513,43 +514,53 @@ export default function Home() {
 
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    if (captureSaving) return;
     const trimmed = captureInput.trim();
     if (!trimmed) return;
 
     const parsed = parseCaptureInput(trimmed);
     const projectId = captureProjectId || fallbackProjectId || undefined;
 
-    let result;
-    if (parsed) {
-      result = await hero.saveDraft({
-        title: "",
-        dueInput: "",
-        captureInput: trimmed,
-        type: "task",
-        projectId,
+    if (!parsed && !pendingDefaultCapture) {
+      setPendingDefaultCapture(true);
+      toast("No wake-up time detected. Add again to use default (tomorrow 8am).", {
+        duration: 6000,
       });
-    } else {
-      if (!pendingDefaultCapture) {
-        setPendingDefaultCapture(true);
-        toast("No wake-up time detected. Add again to use default (tomorrow 8am).", {
-          duration: 6000,
-        });
-        return;
-      }
-      result = await hero.saveDraft({
-        title: trimmed,
-        dueInput: "tomorrow 8am",
-        type: "task",
-        projectId,
-      });
+      return;
     }
 
-    if (!result.ok) return toast.error(result.message);
-    showActionToast(result.message);
-    setCaptureInput("");
-    setCaptureProjectId(fallbackProjectId);
-    setSelectionDismissed(false);
-    setPendingDefaultCapture(false);
+    setCaptureSaving(true);
+    try {
+      const result = parsed
+        ? await hero.saveDraft({
+            title: "",
+            dueInput: "",
+            captureInput: trimmed,
+            type: "task",
+            projectId,
+          })
+        : await hero.saveDraft({
+            title: trimmed,
+            dueInput: "tomorrow 8am",
+            type: "task",
+            projectId,
+          });
+
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      showActionToast(result.message);
+      setCaptureInput("");
+      setCaptureProjectId(fallbackProjectId);
+      setSelectionDismissed(false);
+      setPendingDefaultCapture(false);
+    } catch (error) {
+      console.error("[capture] saveDraft threw", error);
+      toast.error(error instanceof Error ? error.message : "Could not save task. Try again.");
+    } finally {
+      setCaptureSaving(false);
+    }
   }
 
   function cancelHoldDone() {
@@ -1042,7 +1053,7 @@ export default function Home() {
 
             {parsedCapture ? (
               <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-black/52">
-                Saving as “{parsedCapture.title}”
+                {captureSaving ? "Saving" : "Will save"} as “{parsedCapture.title}”
               </div>
             ) : pendingDefaultCapture && captureInput.trim() ? (
               <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-amber-700">
