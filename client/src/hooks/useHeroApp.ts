@@ -145,6 +145,48 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
+// Chrome sometimes poisons its HTTP/2 session to a host and subsequent requests
+// fail instantly (or hang) with ERR_HTTP2_PROTOCOL_ERROR before the server ever
+// sees them. A retry almost always opens a fresh session and succeeds, so wrap
+// every Supabase fetch with a bounded-timeout retry. Only transport-level
+// failures are retried; HTTP responses (including 4xx/5xx) pass through as-is.
+const supabaseFetch: typeof fetch = async (input, init) => {
+  const externalSignal = init?.signal ?? null;
+  const perAttemptTimeoutMs = 8000;
+  const maxAttempts = 3;
+  let lastError: unknown = new Error("Request failed before any attempt ran.");
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (externalSignal?.aborted) {
+      throw externalSignal.reason ?? new DOMException("Aborted", "AbortError");
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(new DOMException("Fetch timed out", "TimeoutError")),
+      perAttemptTimeoutMs,
+    );
+    const onExternalAbort = () => controller.abort(externalSignal?.reason);
+    externalSignal?.addEventListener("abort", onExternalAbort);
+
+    try {
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      clearTimeout(timeoutId);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+      if (externalSignal?.aborted) throw err;
+      lastError = err;
+      if (attempt === maxAttempts - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
+
+  throw lastError;
+};
+
 const supabase =
   supabaseUrl && supabaseKey
     ? createClient(supabaseUrl, supabaseKey, {
@@ -152,6 +194,9 @@ const supabase =
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
+        },
+        global: {
+          fetch: supabaseFetch,
         },
       })
     : null;
@@ -744,29 +789,6 @@ function getSubtreeTailDueAt(items: HeroItem[], rootId: string) {
     }, new Date().getTime());
 }
 
-async function runSyncWithRetry(
-  run: (signal: AbortSignal) => Promise<{ error: { message?: string; name?: string } | null }>,
-  { attempts = 2, timeoutMs = 10000 }: { attempts?: number; timeoutMs?: number } = {},
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  let lastMessage = "Network unavailable.";
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const result = await run(AbortSignal.timeout(timeoutMs));
-      if (!result.error) return { ok: true };
-      lastMessage = result.error.message || "Sync failed.";
-      const retryable =
-        result.error.name === "AbortError" ||
-        lastMessage.toLowerCase().includes("abort") ||
-        lastMessage.toLowerCase().includes("network") ||
-        lastMessage.toLowerCase().includes("fetch");
-      if (!retryable) return { ok: false, message: lastMessage };
-    } catch (err) {
-      lastMessage = err instanceof Error ? err.message : "Unknown network error.";
-    }
-  }
-  return { ok: false, message: lastMessage };
-}
-
 export function useHeroApp() {
   const [user, setUser] = useState<HeroUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -1034,15 +1056,20 @@ export function useHeroApp() {
 
       const client = supabase;
       const insertPayload = toItemInsert(next, user.id);
-      void runSyncWithRetry(async (signal) => {
-        const r = await client.from("items").insert(insertPayload).abortSignal(signal);
-        return { error: r.error };
-      }).then((sync) => {
-        if (sync.ok) return;
-        setItems((current) => current.filter((item) => item.id !== next.id));
-        setUndoState((current) => (current?.kind === "create" && current.item.id === next.id ? null : current));
-        toast.error(`Couldn’t save “${next.title}”. ${sync.message}`);
-      });
+      void (async () => {
+        try {
+          const r = await client.from("items").insert(insertPayload);
+          if (!r.error) return;
+          throw new Error(r.error.message || "Sync failed.");
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Network unavailable.";
+          setItems((current) => current.filter((item) => item.id !== next.id));
+          setUndoState((current) =>
+            current?.kind === "create" && current.item.id === next.id ? null : current,
+          );
+          toast.error(`Couldn’t save “${next.title}”. ${message}`);
+        }
+      })();
 
       return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
     },
@@ -1081,19 +1108,21 @@ export function useHeroApp() {
       const client = supabase;
       const updatePayload = toItemPatch({ ...patch, updatedAt: resolvedUpdatedAt });
       const userId = user.id;
-      void runSyncWithRetry(async (signal) => {
-        const r = await client
-          .from("items")
-          .update(updatePayload)
-          .eq("id", itemId)
-          .eq("user_id", userId)
-          .abortSignal(signal);
-        return { error: r.error };
-      }).then((sync) => {
-        if (sync.ok) return;
-        setItems((current) => current.map((item) => (item.id === itemId ? previous : item)));
-        toast.error(`Couldn’t sync changes to “${previous.title}”. ${sync.message}`);
-      });
+      void (async () => {
+        try {
+          const r = await client
+            .from("items")
+            .update(updatePayload)
+            .eq("id", itemId)
+            .eq("user_id", userId);
+          if (!r.error) return;
+          throw new Error(r.error.message || "Sync failed.");
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Network unavailable.";
+          setItems((current) => current.map((item) => (item.id === itemId ? previous : item)));
+          toast.error(`Couldn’t sync changes to “${previous.title}”. ${message}`);
+        }
+      })();
 
       return { ok: true, message: "Item updated." };
     },
