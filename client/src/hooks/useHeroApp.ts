@@ -7,6 +7,7 @@ Design note for this file:
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as chrono from "chrono-node";
 import { createClient, type Session } from "@supabase/supabase-js";
+import { toast } from "sonner";
 
 export type ProjectTone = "moss" | "slate" | "amber" | "clay" | "ink";
 export type HeroItemType = "task" | "link";
@@ -636,6 +637,7 @@ function toItemInsert(item: HeroItem, userId: string) {
   const safeItem = ensureRemoteSafeItem(item);
 
   return {
+    id: safeItem.id,
     user_id: userId,
     title: safeItem.title,
     type: safeItem.type,
@@ -740,6 +742,29 @@ function getSubtreeTailDueAt(items: HeroItem[], rootId: string) {
       const current = new Date(item.dueAt).getTime();
       return current > latest ? current : latest;
     }, new Date().getTime());
+}
+
+async function runSyncWithRetry(
+  run: (signal: AbortSignal) => Promise<{ error: { message?: string; name?: string } | null }>,
+  { attempts = 2, timeoutMs = 10000 }: { attempts?: number; timeoutMs?: number } = {},
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  let lastMessage = "Network unavailable.";
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const result = await run(AbortSignal.timeout(timeoutMs));
+      if (!result.error) return { ok: true };
+      lastMessage = result.error.message || "Sync failed.";
+      const retryable =
+        result.error.name === "AbortError" ||
+        lastMessage.toLowerCase().includes("abort") ||
+        lastMessage.toLowerCase().includes("network") ||
+        lastMessage.toLowerCase().includes("fetch");
+      if (!retryable) return { ok: false, message: lastMessage };
+    } catch (err) {
+      lastMessage = err instanceof Error ? err.message : "Unknown network error.";
+    }
+  }
+  return { ok: false, message: lastMessage };
 }
 
 export function useHeroApp() {
@@ -1002,26 +1027,24 @@ export function useHeroApp() {
         return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
       }
 
-      const result = await supabase
-        .from("items")
-        .insert(toItemInsert(next, user.id))
-        .select()
-        .abortSignal(AbortSignal.timeout(15000))
-        .single();
-      if (result.error) {
-        const aborted = result.error.message?.toLowerCase().includes("abort") || result.error.name === "AbortError";
-        return {
-          ok: false,
-          message: aborted ? "Save timed out. Check your connection and try again." : result.error.message,
-        };
-      }
-
-      const inserted = mapItemRow(result.data as ItemRow);
-      setItems((current) => [...current, inserted]);
-      setSelectedId(inserted.id);
-      setUndoState({ kind: "create", item: inserted });
+      setItems((current) => [...current, next]);
+      setSelectedId(next.id);
+      setUndoState({ kind: "create", item: next });
       setComposerOpen(false);
-      return { ok: true, message: `Saved for ${formatDueLabel(inserted.dueAt)}.` };
+
+      const client = supabase;
+      const insertPayload = toItemInsert(next, user.id);
+      void runSyncWithRetry(async (signal) => {
+        const r = await client.from("items").insert(insertPayload).abortSignal(signal);
+        return { error: r.error };
+      }).then((sync) => {
+        if (sync.ok) return;
+        setItems((current) => current.filter((item) => item.id !== next.id));
+        setUndoState((current) => (current?.kind === "create" && current.item.id === next.id ? null : current));
+        toast.error(`Couldn’t save “${next.title}”. ${sync.message}`);
+      });
+
+      return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
     },
     [commitLocalSnapshot, items, projects, remoteReady, user],
   );
@@ -1044,25 +1067,34 @@ export function useHeroApp() {
       }
 
       if (!user) return { ok: false, message: "Please sign in first." };
-      const result = await supabase
-        .from("items")
-        .update(toItemPatch({ ...patch, updatedAt: patch.updatedAt ?? nextUpdatedAt }))
-        .eq("id", itemId)
-        .eq("user_id", user.id)
-        .select()
-        .abortSignal(AbortSignal.timeout(15000))
-        .single();
 
-      if (result.error) {
-        const aborted = result.error.message?.toLowerCase().includes("abort") || result.error.name === "AbortError";
-        return {
-          ok: false,
-          message: aborted ? "Update timed out. Check your connection and try again." : result.error.message,
-        };
-      }
+      const previous = items.find((item) => item.id === itemId);
+      if (!previous) return { ok: false, message: "Item not found." };
 
-      const updated = mapItemRow(result.data as ItemRow);
-      setItems((current) => current.map((item) => (item.id === itemId ? updated : item)));
+      const resolvedUpdatedAt = patch.updatedAt ?? nextUpdatedAt;
+      setItems((current) =>
+        current.map((item) =>
+          item.id === itemId ? { ...item, ...patch, updatedAt: resolvedUpdatedAt } : item,
+        ),
+      );
+
+      const client = supabase;
+      const updatePayload = toItemPatch({ ...patch, updatedAt: resolvedUpdatedAt });
+      const userId = user.id;
+      void runSyncWithRetry(async (signal) => {
+        const r = await client
+          .from("items")
+          .update(updatePayload)
+          .eq("id", itemId)
+          .eq("user_id", userId)
+          .abortSignal(signal);
+        return { error: r.error };
+      }).then((sync) => {
+        if (sync.ok) return;
+        setItems((current) => current.map((item) => (item.id === itemId ? previous : item)));
+        toast.error(`Couldn’t sync changes to “${previous.title}”. ${sync.message}`);
+      });
+
       return { ok: true, message: "Item updated." };
     },
     [commitLocalSnapshot, defaultProjectId, items, projects, remoteReady, user],
