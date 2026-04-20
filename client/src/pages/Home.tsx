@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { Star } from "lucide-react";
 import {
   formatDueLabel,
   parseCaptureInput,
@@ -18,6 +19,8 @@ import {
   type HeroItem,
   type ProjectTone,
 } from "@/hooks/useHeroApp";
+
+const STAR_GOLD = "#c8941f";
 
 const heroLogo =
   "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
@@ -212,6 +215,7 @@ function HelpPanel({
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Act on selected task</div>
         <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">⇧⌘D</span></div>
         <div className="flex items-center justify-between gap-3"><span>delete</span><span className="font-semibold">⇧⌘⌫</span></div>
+        <div className="flex items-center justify-between gap-3"><span>star / unstar (max 3)</span><span className="font-semibold">⇧⌘1</span></div>
         <div className="flex items-center justify-between gap-3"><span>activate hovered task (tunnel)</span><span className="font-semibold">⇧⌘A</span></div>
         <div className="flex items-center justify-between gap-3"><span>exit active task</span><span className="font-semibold">Esc</span></div>
         <div className="flex items-center justify-between gap-3"><span>undo last action (after Esc)</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
@@ -620,6 +624,12 @@ export default function Home() {
     showActionToast(result.message);
   }
 
+  async function toggleStar(itemId: string) {
+    const result = await hero.toggleStar(itemId);
+    if (!result.ok) return toast.error(result.message);
+    showActionToast(result.message);
+  }
+
   async function applyMove(itemId: string, targetId: string, mode: MoveMode) {
     const result = await hero.moveItem(itemId, targetId, mode);
     if (!result.ok) return toast.error(result.message);
@@ -719,6 +729,13 @@ export default function Home() {
       if (usesShortcutModifier && selectedRow && (event.key === "Backspace" || event.key === "Delete")) {
         event.preventDefault();
         void removeItem(selectedRow.item.id);
+        return;
+      }
+      if (usesShortcutModifier && selectedRow && (event.code === "Digit1" || event.key === "1" || event.key === "!")) {
+        event.preventDefault();
+        if (!event.repeat) {
+          void toggleStar(selectedRow.item.id);
+        }
         return;
       }
 
@@ -1287,6 +1304,26 @@ export default function Home() {
                     </div>
 
                     <div className={`flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
+                      <button
+                        type="button"
+                        disabled={actionsDimmed}
+                        onClick={() => void toggleStar(row.item.id)}
+                        aria-pressed={Boolean(row.item.isStarred)}
+                        className={`inline-flex h-9 w-9 items-center justify-center border transition disabled:cursor-not-allowed ${
+                          row.item.isStarred
+                            ? "border-[#c8941f]/55 hover:border-[#c8941f]"
+                            : "border-black/18 text-black/35 hover:border-black hover:text-black"
+                        }`}
+                        aria-label={row.item.isStarred ? "Unstar task" : "Star task"}
+                        title={row.item.isStarred ? "Unstar (⇧⌘1)" : "Star (⇧⌘1)"}
+                      >
+                        <Star
+                          className="h-4 w-4"
+                          strokeWidth={1.6}
+                          fill={row.item.isStarred ? STAR_GOLD : "none"}
+                          color={row.item.isStarred ? STAR_GOLD : "currentColor"}
+                        />
+                      </button>
                       <button
                         type="button"
                         ref={(el) => {

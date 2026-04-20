@@ -31,9 +31,12 @@ export interface HeroItem {
   url?: string;
   projectId?: string;
   isRecurringDaily?: boolean;
+  isStarred?: boolean;
   brokenDownFromId?: string;
   originalTitle?: string;
 }
+
+export const MAX_STARRED_TASKS = 3;
 
 export interface HeroUser {
   id: string;
@@ -95,6 +98,7 @@ interface ItemRow {
   url: string | null;
   project_id: string | null;
   is_recurring_daily: boolean;
+  is_starred: boolean | null;
   broken_down_from_id: string | null;
   original_title: string | null;
 }
@@ -611,6 +615,7 @@ function mapItemRow(row: ItemRow): HeroItem {
     url: row.url ?? undefined,
     projectId: row.project_id ?? undefined,
     isRecurringDaily: row.is_recurring_daily,
+    isStarred: row.is_starred ?? false,
     brokenDownFromId: row.broken_down_from_id ?? undefined,
     originalTitle: row.original_title ?? undefined,
   };
@@ -642,6 +647,7 @@ function toItemInsert(item: HeroItem, userId: string) {
     url: safeItem.url ?? null,
     project_id: safeItem.projectId ?? null,
     is_recurring_daily: safeItem.isRecurringDaily ?? false,
+    is_starred: safeItem.isStarred ?? false,
     broken_down_from_id: safeItem.brokenDownFromId ?? null,
     original_title: safeItem.originalTitle ?? null,
   };
@@ -660,6 +666,7 @@ function toItemPatch(patch: Partial<HeroItem>) {
   if (patch.url !== undefined) mapped.url = patch.url ?? null;
   if (patch.projectId !== undefined) mapped.project_id = sanitizeProjectId(patch.projectId) ?? null;
   if (patch.isRecurringDaily !== undefined) mapped.is_recurring_daily = patch.isRecurringDaily;
+  if (patch.isStarred !== undefined) mapped.is_starred = patch.isStarred ?? false;
   if (patch.brokenDownFromId !== undefined) {
     mapped.broken_down_from_id = isUuid(patch.brokenDownFromId) ? patch.brokenDownFromId : null;
   }
@@ -1136,6 +1143,32 @@ export function useHeroApp() {
     [items, upcomingItems, updateItem],
   );
 
+  const toggleStar = useCallback(
+    async (itemId: string): Promise<MutationResult> => {
+      const target = items.find((item) => item.id === itemId);
+      if (!target) return { ok: false, message: "Item not found." };
+
+      const willStar = !target.isStarred;
+      if (willStar) {
+        const starredCount = items.filter(
+          (item) => item.isStarred && item.status === "upcoming" && item.id !== itemId,
+        ).length;
+        if (starredCount >= MAX_STARRED_TASKS) {
+          return {
+            ok: false,
+            message: `You can star at most ${MAX_STARRED_TASKS} tasks. Unstar one first.`,
+          };
+        }
+      }
+
+      const result = await updateItem(itemId, { isStarred: willStar });
+      if (!result.ok) return result;
+      setUndoState({ kind: "update", item: target });
+      return { ok: true, message: willStar ? "Task starred." : "Star removed." };
+    },
+    [items, updateItem],
+  );
+
   const removeItem = useCallback(
     async (itemId: string): Promise<MutationResult> => {
       const target = items.find((item) => item.id === itemId);
@@ -1219,6 +1252,7 @@ export function useHeroApp() {
       url: restored.url,
       projectId: restored.projectId,
       isRecurringDaily: restored.isRecurringDaily,
+      isStarred: restored.isStarred,
       brokenDownFromId: restored.brokenDownFromId,
       originalTitle: restored.originalTitle,
     });
@@ -1500,6 +1534,7 @@ export function useHeroApp() {
     signInWithPassword,
     signOut,
     signUpWithPassword,
+    toggleStar,
     undoLastAction,
     updateProject,
   };
