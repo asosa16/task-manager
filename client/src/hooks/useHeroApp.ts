@@ -1002,9 +1002,18 @@ export function useHeroApp() {
         return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
       }
 
-      const result = await supabase.from("items").insert(toItemInsert(next, user.id)).select().single();
+      const result = await supabase
+        .from("items")
+        .insert(toItemInsert(next, user.id))
+        .select()
+        .abortSignal(AbortSignal.timeout(15000))
+        .single();
       if (result.error) {
-        return { ok: false, message: result.error.message };
+        const aborted = result.error.message?.toLowerCase().includes("abort") || result.error.name === "AbortError";
+        return {
+          ok: false,
+          message: aborted ? "Save timed out. Check your connection and try again." : result.error.message,
+        };
       }
 
       const inserted = mapItemRow(result.data as ItemRow);
@@ -1041,10 +1050,15 @@ export function useHeroApp() {
         .eq("id", itemId)
         .eq("user_id", user.id)
         .select()
+        .abortSignal(AbortSignal.timeout(15000))
         .single();
 
       if (result.error) {
-        return { ok: false, message: result.error.message };
+        const aborted = result.error.message?.toLowerCase().includes("abort") || result.error.name === "AbortError";
+        return {
+          ok: false,
+          message: aborted ? "Update timed out. Check your connection and try again." : result.error.message,
+        };
       }
 
       const updated = mapItemRow(result.data as ItemRow);
