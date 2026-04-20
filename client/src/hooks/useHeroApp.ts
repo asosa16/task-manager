@@ -7,7 +7,6 @@ Design note for this file:
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as chrono from "chrono-node";
 import { createClient, type Session } from "@supabase/supabase-js";
-import { toast } from "sonner";
 
 export type ProjectTone = "moss" | "slate" | "amber" | "clay" | "ink";
 export type HeroItemType = "task" | "link";
@@ -1049,29 +1048,17 @@ export function useHeroApp() {
         return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
       }
 
-      setItems((current) => [...current, next]);
-      setSelectedId(next.id);
-      setUndoState({ kind: "create", item: next });
+      const result = await supabase.from("items").insert(toItemInsert(next, user.id)).select().single();
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
+
+      const inserted = mapItemRow(result.data as ItemRow);
+      setItems((current) => [...current, inserted]);
+      setSelectedId(inserted.id);
+      setUndoState({ kind: "create", item: inserted });
       setComposerOpen(false);
-
-      const client = supabase;
-      const insertPayload = toItemInsert(next, user.id);
-      void (async () => {
-        try {
-          const r = await client.from("items").insert(insertPayload);
-          if (!r.error) return;
-          throw new Error(r.error.message || "Sync failed.");
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Network unavailable.";
-          setItems((current) => current.filter((item) => item.id !== next.id));
-          setUndoState((current) =>
-            current?.kind === "create" && current.item.id === next.id ? null : current,
-          );
-          toast.error(`Couldn’t save “${next.title}”. ${message}`);
-        }
-      })();
-
-      return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
+      return { ok: true, message: `Saved for ${formatDueLabel(inserted.dueAt)}.` };
     },
     [commitLocalSnapshot, items, projects, remoteReady, user],
   );
@@ -1094,36 +1081,20 @@ export function useHeroApp() {
       }
 
       if (!user) return { ok: false, message: "Please sign in first." };
+      const result = await supabase
+        .from("items")
+        .update(toItemPatch({ ...patch, updatedAt: patch.updatedAt ?? nextUpdatedAt }))
+        .eq("id", itemId)
+        .eq("user_id", user.id)
+        .select()
+        .single();
 
-      const previous = items.find((item) => item.id === itemId);
-      if (!previous) return { ok: false, message: "Item not found." };
+      if (result.error) {
+        return { ok: false, message: result.error.message };
+      }
 
-      const resolvedUpdatedAt = patch.updatedAt ?? nextUpdatedAt;
-      setItems((current) =>
-        current.map((item) =>
-          item.id === itemId ? { ...item, ...patch, updatedAt: resolvedUpdatedAt } : item,
-        ),
-      );
-
-      const client = supabase;
-      const updatePayload = toItemPatch({ ...patch, updatedAt: resolvedUpdatedAt });
-      const userId = user.id;
-      void (async () => {
-        try {
-          const r = await client
-            .from("items")
-            .update(updatePayload)
-            .eq("id", itemId)
-            .eq("user_id", userId);
-          if (!r.error) return;
-          throw new Error(r.error.message || "Sync failed.");
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Network unavailable.";
-          setItems((current) => current.map((item) => (item.id === itemId ? previous : item)));
-          toast.error(`Couldn’t sync changes to “${previous.title}”. ${message}`);
-        }
-      })();
-
+      const updated = mapItemRow(result.data as ItemRow);
+      setItems((current) => current.map((item) => (item.id === itemId ? updated : item)));
       return { ok: true, message: "Item updated." };
     },
     [commitLocalSnapshot, defaultProjectId, items, projects, remoteReady, user],
