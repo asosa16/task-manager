@@ -322,7 +322,11 @@ export default function Home() {
   const [grabbedItemId, setGrabbedItemId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
-  const [completingItemId, setCompletingItemId] = useState<string | null>(null);
+  const [leavingRow, setLeavingRow] = useState<{
+    row: DisplayRow;
+    originalIndex: number;
+    phase: "celebrate" | "dispatch";
+  } | null>(null);
   const [holdingDoneItemId, setHoldingDoneItemId] = useState<string | null>(null);
   const [confettiBursts, setConfettiBursts] = useState<Array<{ id: string; x: number; y: number }>>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
@@ -336,6 +340,8 @@ export default function Home() {
   const hasAutoFocusedCaptureRef = useRef(false);
   const doneButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
   const holdDoneTimerRef = useRef<number | null>(null);
+  const celebrateTimerRef = useRef<number | null>(null);
+  const dispatchTimerRef = useRef<number | null>(null);
 
   const filteredItems = useMemo(
     () => (listMode === "today" ? hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt)) : hero.upcomingItems),
@@ -343,6 +349,15 @@ export default function Home() {
   );
 
   const displayRows = useMemo(() => buildDisplayRows(filteredItems), [filteredItems]);
+  const renderRows = useMemo(() => {
+    if (!leavingRow) return displayRows;
+    if (displayRows.some((r) => r.item.id === leavingRow.row.item.id)) return displayRows;
+    const insertAt = Math.min(leavingRow.originalIndex, displayRows.length);
+    const merged = displayRows.slice();
+    merged.splice(insertAt, 0, leavingRow.row);
+    return merged;
+  }, [displayRows, leavingRow]);
+  const focusLockId = holdingDoneItemId ?? (leavingRow?.phase === "celebrate" ? leavingRow.row.item.id : null);
   const projectById = useMemo(() => new Map(hero.projects.map((project) => [project.id, project])), [hero.projects]);
   const fallbackProjectId = hero.defaultProjectId ?? hero.projects[0]?.id ?? "";
   const selectedIndex = useMemo(() => displayRows.findIndex((row) => row.item.id === hero.selectedId), [displayRows, hero.selectedId]);
@@ -601,20 +616,53 @@ export default function Home() {
     }, 800);
   }
 
+  function clearLeavingTimers() {
+    if (celebrateTimerRef.current !== null) {
+      window.clearTimeout(celebrateTimerRef.current);
+      celebrateTimerRef.current = null;
+    }
+    if (dispatchTimerRef.current !== null) {
+      window.clearTimeout(dispatchTimerRef.current);
+      dispatchTimerRef.current = null;
+    }
+  }
+
   async function markDone(itemId: string) {
     cancelHoldDone();
     if (editItemId === itemId) {
       setEditItemId(null);
       blurActiveElement();
     }
+    const originalIndex = displayRows.findIndex((r) => r.item.id === itemId);
+    const row = originalIndex >= 0 ? displayRows[originalIndex] : null;
+    if (!row) {
+      const result = await hero.markDone(itemId);
+      if (!result.ok) return toast.error(result.message);
+      showActionToast(result.message);
+      return;
+    }
+
+    clearLeavingTimers();
     spawnConfettiBurst(itemId);
-    setCompletingItemId(itemId);
-    const [result] = await Promise.all([
-      hero.markDone(itemId),
-      new Promise<void>((resolve) => window.setTimeout(resolve, 520)),
-    ]);
-    setCompletingItemId(null);
-    if (!result.ok) return toast.error(result.message);
+    setLeavingRow({ row, originalIndex, phase: "celebrate" });
+
+    const mutation = hero.markDone(itemId);
+
+    celebrateTimerRef.current = window.setTimeout(() => {
+      celebrateTimerRef.current = null;
+      setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev));
+      dispatchTimerRef.current = window.setTimeout(() => {
+        dispatchTimerRef.current = null;
+        setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
+      }, 350);
+    }, 450);
+
+    const result = await mutation;
+    if (!result.ok) {
+      clearLeavingTimers();
+      setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
+      return toast.error(result.message);
+    }
     showActionToast(result.message);
   }
 
@@ -824,6 +872,13 @@ export default function Home() {
     return () => {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (celebrateTimerRef.current !== null) window.clearTimeout(celebrateTimerRef.current);
+      if (dispatchTimerRef.current !== null) window.clearTimeout(dispatchTimerRef.current);
     };
   }, []);
 
@@ -1080,13 +1135,16 @@ export default function Home() {
           </header>
 
           <div className="divide-y divide-black/10">
-            {displayRows.map((row) => {
+            {renderRows.map((row) => {
               const isSelected = hero.selectedId === row.item.id && !captureFocused;
               const isEditingRow = editItemId === row.item.id;
-              const isCompletingRow = completingItemId === row.item.id;
+              const isCelebratingRow = leavingRow?.phase === "celebrate" && leavingRow.row.item.id === row.item.id;
+              const isDispatchingRow = leavingRow?.phase === "dispatch" && leavingRow.row.item.id === row.item.id;
+              const isLeavingRow = isCelebratingRow || isDispatchingRow;
               const isHoldingDoneRow = holdingDoneItemId === row.item.id;
               const isActiveRow = activeItemId === row.item.id;
               const isDimmed = Boolean(activeItemId) && !isActiveRow;
+              const isBystander = focusLockId !== null && focusLockId !== row.item.id;
               const isPastDue = new Date(row.item.dueAt).getTime() < Date.now();
               const project = projectById.get(resolveProjectId(row.item.projectId));
               const projectName = project?.name ?? null;
@@ -1096,10 +1154,12 @@ export default function Home() {
               const actionsDimmed = isTyping && !isEditingRow;
               const rowClass = [
                 isSelected ? "bg-black/[0.035]" : "bg-white",
-                isCompletingRow ? "hero-row-completing" : "",
+                isCelebratingRow ? "hero-row-celebrating" : "",
+                isDispatchingRow ? "hero-row-dispatching" : "",
                 isHoldingDoneRow ? "hero-row-holding-done" : "",
                 isActiveRow ? "hero-tunnel-active" : "",
                 isDimmed ? "hero-tunnel-dim" : "",
+                isBystander ? "hero-row-bystander" : "",
               ].filter(Boolean).join(" ");
 
               return (
@@ -1210,7 +1270,7 @@ export default function Home() {
                             <span className="hero-title-text block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
                             {projectName ? <span className="mt-1 hidden text-[11px] uppercase tracking-[0.14em] text-black/45 sm:block">{projectName}</span> : null}
                           </span>
-                          {isCompletingRow ? (
+                          {isLeavingRow ? (
                             <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
                               <span className="hero-done-burst absolute inset-0 rounded-full bg-emerald-400/60" />
                               <span className="hero-done-check-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-bold shadow-[0_6px_18px_rgba(5,150,105,0.35)]">
@@ -1330,7 +1390,7 @@ export default function Home() {
                           if (el) doneButtonRefs.current.set(row.item.id, el);
                           else doneButtonRefs.current.delete(row.item.id);
                         }}
-                        disabled={actionsDimmed || isCompletingRow}
+                        disabled={actionsDimmed || isLeavingRow}
                         onClick={() => void markDone(row.item.id)}
                         className="inline-flex h-9 w-9 items-center justify-center gap-1 border border-black/22 px-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed sm:w-auto sm:min-w-[74px] sm:px-2"
                         aria-label="Mark task as done"
