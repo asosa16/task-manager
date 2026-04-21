@@ -533,7 +533,10 @@ export default function Home() {
 
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (captureSaving) return;
+    if (captureSaving) {
+      toast("Still saving — hang on a sec.", { duration: 2000 });
+      return;
+    }
     const trimmed = captureInput.trim();
     if (!trimmed) return;
 
