@@ -534,6 +534,7 @@ export default function Home() {
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (captureSaving) {
+      console.log("[hero][submit] blocked: captureSaving already true");
       toast("Still saving — hang on a sec.", { duration: 2000 });
       return;
     }
@@ -551,7 +552,9 @@ export default function Home() {
       return;
     }
 
+    console.log("[hero][submit] start", { parsed: !!parsed, length: trimmed.length });
     setCaptureSaving(true);
+    const submitStartedAt = performance.now();
     try {
       const result = parsed
         ? await hero.saveDraft({
@@ -568,6 +571,11 @@ export default function Home() {
             projectId,
           });
 
+      console.log(
+        "[hero][submit] saveDraft returned",
+        { ok: result.ok, message: result.message },
+        `${Math.round(performance.now() - submitStartedAt)}ms`,
+      );
       if (!result.ok) {
         toast.error(result.message);
         return;
@@ -578,9 +586,17 @@ export default function Home() {
       setSelectionDismissed(false);
       setPendingDefaultCapture(false);
     } catch (error) {
-      console.error("[capture] saveDraft threw", error);
+      console.error(
+        "[hero][submit] saveDraft threw",
+        `${Math.round(performance.now() - submitStartedAt)}ms`,
+        error,
+      );
       toast.error(error instanceof Error ? error.message : "Could not save task. Try again.");
     } finally {
+      console.log(
+        "[hero][submit] finally, clearing captureSaving",
+        `${Math.round(performance.now() - submitStartedAt)}ms`,
+      );
       setCaptureSaving(false);
     }
   }

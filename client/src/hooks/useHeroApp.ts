@@ -150,22 +150,37 @@ const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
 // supabase-js's internal `.json()` can await forever and the outer await in
 // saveDraft/updateItem never settles, which leaves captureSaving stuck true
 // and the UI showing "Saving as …" indefinitely.
+let supabaseFetchSeq = 0;
 const supabaseFetch: typeof fetch = async (input, init) => {
+  const reqId = ++supabaseFetchSeq;
+  const method = (init?.method ?? "GET").toUpperCase();
+  const url =
+    typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const startedAt = performance.now();
+  const since = () => `${Math.round(performance.now() - startedAt)}ms`;
+  console.log("[hero][fetch][req]", reqId, method, url);
+
   const externalSignal = init?.signal ?? null;
   if (externalSignal?.aborted) {
+    console.warn("[hero][fetch][pre-aborted]", reqId, method, url);
     throw externalSignal.reason ?? new DOMException("Aborted", "AbortError");
   }
 
   const controller = new AbortController();
-  setTimeout(
-    () => controller.abort(new DOMException("Request timed out", "TimeoutError")),
-    10000,
-  );
+  setTimeout(() => {
+    console.warn("[hero][fetch][timeout-fired]", reqId, since(), method, url);
+    controller.abort(new DOMException("Request timed out", "TimeoutError"));
+  }, 10000);
   const onExternalAbort = () => controller.abort(externalSignal?.reason);
   externalSignal?.addEventListener("abort", onExternalAbort);
 
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    console.log("[hero][fetch][res]", reqId, response.status, since(), url);
+    return response;
+  } catch (err) {
+    console.error("[hero][fetch][err]", reqId, since(), method, url, err);
+    throw err;
   } finally {
     externalSignal?.removeEventListener("abort", onExternalAbort);
   }
@@ -858,7 +873,8 @@ export function useHeroApp() {
       if (!active) return;
       setAuthChecked(true);
 
-      const subscription = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const subscription = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log("[hero][auth]", event, session ? "hasSession" : "noSession");
         const changedUser = await getSupabaseUserFromSession(session);
         if (!active) return;
 
@@ -889,6 +905,25 @@ export function useHeroApp() {
       unsubscribe();
     };
   }, [loadUserSnapshot]);
+
+  useEffect(() => {
+    const onVisibility = () =>
+      console.log("[hero][visibility]", document.visibilityState, "online:", navigator.onLine);
+    const onOnline = () => console.log("[hero][online]");
+    const onOffline = () => console.log("[hero][offline]");
+    const onPageShow = (event: PageTransitionEvent) =>
+      console.log("[hero][pageshow] persisted:", event.persisted);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
 
   const commitLocalSnapshot = useCallback(
     (nextProjects: HeroProject[], nextItems: HeroItem[], nextDefaultProjectId: string | null = defaultProjectId) => {
@@ -981,6 +1016,12 @@ export function useHeroApp() {
 
   const saveDraft = useCallback(
     async (draft: CaptureDraft): Promise<MutationResult> => {
+      console.log("[hero][saveDraft] entry", {
+        hasUser: !!user,
+        mode: user?.mode,
+        remoteReady,
+        hasSupabase: !!supabase,
+      });
       if (!user) return { ok: false, message: "Please sign in first." };
 
       let nextTitle = draft.title.trim();
@@ -1024,6 +1065,7 @@ export function useHeroApp() {
       };
 
       if (user.mode === "demo" || !remoteReady || !supabase) {
+        console.log("[hero][saveDraft] local path");
         const nextItems = [...items, next];
         commitLocalSnapshot(projects, nextItems);
         setSelectedId(next.id);
@@ -1032,7 +1074,13 @@ export function useHeroApp() {
         return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
       }
 
+      console.log("[hero][saveDraft] before supabase.insert", { id: next.id });
       const result = await supabase.from("items").insert(toItemInsert(next, user.id)).select().single();
+      console.log("[hero][saveDraft] after supabase.insert", {
+        ok: !result.error,
+        errorMessage: result.error?.message,
+        errorCode: result.error?.code,
+      });
       if (result.error) {
         return { ok: false, message: result.error.message };
       }
