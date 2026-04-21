@@ -918,12 +918,44 @@ export function useHeroApp() {
   }, [loadUserSnapshot]);
 
   useEffect(() => {
-    const onVisibility = () =>
+    // On laptop sleep/wake, supabase-js's GoTrueClient can be left with a
+    // stale internal lock: a pre-sleep operation sets `lockAcquired = true`
+    // and/or pushes a promise onto `pendingInLock`, the underlying fetch gets
+    // zombied during sleep and never settles, and every subsequent
+    // auth.getSession() call queues behind that dead promise — so every
+    // supabase.from().insert()/.update() that calls _getAccessToken hangs
+    // forever *before* it ever hits our fetch wrapper. Our `lock` override
+    // only replaces the outer navigator.locks call; it doesn't clear this
+    // in-memory state. Forcibly reset it on each wake so the next save
+    // enters the clean path.
+    const resetAuthLockState = () => {
+      if (!supabase) return;
+      const auth = supabase.auth as unknown as {
+        lockAcquired: boolean;
+        pendingInLock: Promise<unknown>[];
+      };
+      if (auth.lockAcquired || (auth.pendingInLock && auth.pendingInLock.length > 0)) {
+        console.warn(
+          "[hero][auth] resetting stuck GoTrueClient lock state",
+          { lockAcquired: auth.lockAcquired, pendingInLockLen: auth.pendingInLock?.length },
+        );
+      }
+      auth.lockAcquired = false;
+      auth.pendingInLock = [];
+    };
+    const onVisibility = () => {
       console.log("[hero][visibility]", document.visibilityState, "online:", navigator.onLine);
-    const onOnline = () => console.log("[hero][online]");
+      if (document.visibilityState === "visible") resetAuthLockState();
+    };
+    const onOnline = () => {
+      console.log("[hero][online]");
+      resetAuthLockState();
+    };
     const onOffline = () => console.log("[hero][offline]");
-    const onPageShow = (event: PageTransitionEvent) =>
+    const onPageShow = (event: PageTransitionEvent) => {
       console.log("[hero][pageshow] persisted:", event.persisted);
+      if (event.persisted) resetAuthLockState();
+    };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
