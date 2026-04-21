@@ -4,7 +4,7 @@ Design note for this file:
 - Preserve compact domain objects and shortcut-driven actions rather than introducing heavy app architecture.
 - The web rebuild should support per-user hosted sync with simple email/password auth first, while remaining usable before external setup is finished.
 */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as chrono from "chrono-node";
 import { createClient, type Session } from "@supabase/supabase-js";
 
@@ -144,49 +144,31 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
-// Chrome sometimes poisons its HTTP/2 session to a host and subsequent requests
-// fail instantly (or hang) with ERR_HTTP2_PROTOCOL_ERROR before the server ever
-// sees them. A retry almost always opens a fresh session and succeeds, so wrap
-// every Supabase fetch with a bounded-timeout retry. Only transport-level
-// failures are retried; HTTP responses (including 4xx/5xx) pass through as-is.
-// The per-attempt timer stays armed after headers arrive so a stalled response
-// body (the HTTP/2 symptom that poisons the session without failing the TCP
-// socket) also gets aborted — without that, supabase-js's `.json()` can await
-// forever and saveDraft's outer `await` never settles.
+// Single-attempt fetch with a 10s total timeout that covers headers AND body
+// read. The timer stays armed after fetch() resolves so a stalled response
+// body (Chrome's HTTP/2 half-dead symptom) also gets aborted — otherwise
+// supabase-js's internal `.json()` can await forever and the outer await in
+// saveDraft/updateItem never settles, which leaves captureSaving stuck true
+// and the UI showing "Saving as …" indefinitely.
 const supabaseFetch: typeof fetch = async (input, init) => {
   const externalSignal = init?.signal ?? null;
-  const perAttemptTimeoutMs = 8000;
-  const maxAttempts = 3;
-  let lastError: unknown = new Error("Request failed before any attempt ran.");
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (externalSignal?.aborted) {
-      throw externalSignal.reason ?? new DOMException("Aborted", "AbortError");
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(new DOMException("Fetch timed out", "TimeoutError")),
-      perAttemptTimeoutMs,
-    );
-    const onExternalAbort = () => controller.abort(externalSignal?.reason);
-    externalSignal?.addEventListener("abort", onExternalAbort);
-
-    try {
-      const response = await fetch(input, { ...init, signal: controller.signal });
-      externalSignal?.removeEventListener("abort", onExternalAbort);
-      return response;
-    } catch (err) {
-      clearTimeout(timeoutId);
-      externalSignal?.removeEventListener("abort", onExternalAbort);
-      if (externalSignal?.aborted) throw err;
-      lastError = err;
-      if (attempt === maxAttempts - 1) break;
-      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
-    }
+  if (externalSignal?.aborted) {
+    throw externalSignal.reason ?? new DOMException("Aborted", "AbortError");
   }
 
-  throw lastError;
+  const controller = new AbortController();
+  setTimeout(
+    () => controller.abort(new DOMException("Request timed out", "TimeoutError")),
+    10000,
+  );
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+  externalSignal?.addEventListener("abort", onExternalAbort);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    externalSignal?.removeEventListener("abort", onExternalAbort);
+  }
 };
 
 const supabase =
@@ -807,11 +789,6 @@ export function useHeroApp() {
       ? "Hosted sync is ready. Sign in with email and password to load your Hero workspace."
       : "Demo mode is active until Supabase keys are added.",
   );
-  // Keyed by the exact captureInput/title the user submitted: if a previous
-  // saveDraft attempt with that text timed out on the client but actually
-  // landed on the server, retrying with the same key reuses the same UUID so
-  // the follow-up becomes an idempotent upsert instead of a duplicate row.
-  const pendingDraftIdsRef = useRef<Map<string, string>>(new Map());
 
   const applySnapshot = useCallback((snapshot: HeroSnapshot, userId: string, persistLocally = false) => {
     const resolvedDefaultProjectId = resolveDefaultProjectId(snapshot.projects, readPreferences(userId).defaultProjectId);
@@ -1030,17 +1007,10 @@ export function useHeroApp() {
         return { ok: false, message: "Link items should use a full https:// URL." };
       }
 
-      const draftKey = (draft.captureInput || draft.title).trim();
-      const cachedId = draftKey ? pendingDraftIdsRef.current.get(draftKey) : undefined;
-      const nextId = cachedId ?? createRecordId();
-      if (draftKey && !cachedId) {
-        pendingDraftIdsRef.current.set(draftKey, nextId);
-      }
-
       const now = new Date().toISOString();
       const nextProjectId = sanitizeProjectId(draft.projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined;
       const next: HeroItem = {
-        id: nextId,
+        id: createRecordId(),
         title: nextTitle,
         type: draft.type,
         status: "upcoming",
@@ -1053,46 +1023,25 @@ export function useHeroApp() {
         originalTitle: draft.type === "task" ? nextTitle : undefined,
       };
 
-
       if (user.mode === "demo" || !remoteReady || !supabase) {
         const nextItems = [...items, next];
         commitLocalSnapshot(projects, nextItems);
         setSelectedId(next.id);
         setUndoState({ kind: "create", item: next });
         setComposerOpen(false);
-        if (draftKey) pendingDraftIdsRef.current.delete(draftKey);
         return { ok: true, message: `Saved for ${formatDueLabel(next.dueAt)}.` };
       }
 
-      const startedAt = performance.now();
-      const result = await supabase
-        .from("items")
-        .upsert(toItemInsert(next, user.id), { onConflict: "id" })
-        .select()
-        .single();
+      const result = await supabase.from("items").insert(toItemInsert(next, user.id)).select().single();
       if (result.error) {
-        const message = result.error.message ?? "";
-        if (/abort|timed out|timeout/i.test(message)) {
-          console.warn(
-            "[saveDraft] supabase upsert aborted after",
-            Math.round(performance.now() - startedAt),
-            "ms — retrying with the same text will be idempotent (cached id kept).",
-            { id: nextId },
-          );
-        }
-        return { ok: false, message: message || "Could not save. Try again." };
+        return { ok: false, message: result.error.message };
       }
 
       const inserted = mapItemRow(result.data as ItemRow);
-      setItems((current) =>
-        current.some((item) => item.id === inserted.id)
-          ? current.map((item) => (item.id === inserted.id ? inserted : item))
-          : [...current, inserted],
-      );
+      setItems((current) => [...current, inserted]);
       setSelectedId(inserted.id);
       setUndoState({ kind: "create", item: inserted });
       setComposerOpen(false);
-      if (draftKey) pendingDraftIdsRef.current.delete(draftKey);
       return { ok: true, message: `Saved for ${formatDueLabel(inserted.dueAt)}.` };
     },
     [commitLocalSnapshot, defaultProjectId, items, projects, remoteReady, user],
