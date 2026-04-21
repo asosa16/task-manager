@@ -193,6 +193,17 @@ const supabase =
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
+          // Disable Navigator LockManager coordination on the auth session.
+          // After laptop sleep/wake in Chrome, the LockManager callback that
+          // holds the "gotrue" lock can get suspended and never resumes, which
+          // leaves the lock held indefinitely. Every subsequent data call goes
+          // through fetchWithAuth → _getAccessToken → auth.getSession, all of
+          // which try to acquire that same lock — and hang before any fetch is
+          // issued. That's the stuck "Saving as …" state. A pass-through lock
+          // removes the wedge entirely. The only thing we give up is cross-tab
+          // coordination of token refreshes, which matters only if two tabs
+          // are open concurrently; at worst they'd each do their own refresh.
+          lock: (_name, _acquireTimeout, fn) => fn(),
         },
         global: {
           fetch: supabaseFetch,
