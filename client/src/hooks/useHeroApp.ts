@@ -8,137 +8,55 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as chrono from "chrono-node";
 import { createClient, type Session } from "@supabase/supabase-js";
 
-export type ProjectTone = "moss" | "slate" | "amber" | "clay" | "ink";
-export type HeroItemType = "task" | "link";
-export type HeroStatus = "upcoming" | "done";
+import {
+  MAX_STARRED_TASKS,
+  createRecordId,
+  ensureRemoteSafeItem,
+  ensureRemoteSafeProject,
+  isUuid,
+  legacyShortcutHints,
+  mapItemRow,
+  mapProjectRow,
+  normalizeSnapshotIds,
+  orderedTones,
+  sanitizeProjectId,
+  toItemInsert,
+  toItemPatch,
+  toProjectInsert,
+  toneClassMap,
+  toneColorMap,
+  toneLabelMap,
+  type CaptureDraft,
+  type HeroItem,
+  type HeroItemType,
+  type HeroPreferences,
+  type HeroProject,
+  type HeroSnapshot,
+  type HeroStatus,
+  type HeroUser,
+  type ItemRow,
+  type MutationResult,
+  type ParsedCaptureInput,
+  type ProjectRow,
+  type ProjectTone,
+  type UndoState,
+} from "@/lib/heroStore.types";
 
-export interface HeroProject {
-  id: string;
-  name: string;
-  tone: ProjectTone;
-  createdAt: string;
-}
-
-export interface HeroItem {
-  id: string;
-  title: string;
-  type: HeroItemType;
-  status: HeroStatus;
-  dueAt: string;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  url?: string;
-  projectId?: string;
-  isRecurringDaily?: boolean;
-  isStarred?: boolean;
-  brokenDownFromId?: string;
-  originalTitle?: string;
-}
-
-export const MAX_STARRED_TASKS = 3;
-
-export interface HeroUser {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl?: string;
-  mode: "demo" | "supabase";
-}
-
-export interface CaptureDraft {
-  title: string;
-  dueInput: string;
-  captureInput?: string;
-  projectId?: string;
-  type: HeroItemType;
-  url?: string;
-  isRecurringDaily?: boolean;
-}
-
-export interface ParsedCaptureInput {
-  title: string;
-  dueAt: string;
-  matchedText: string;
-}
-
-interface HeroSnapshot {
-  projects: HeroProject[];
-  items: HeroItem[];
-}
-
-interface UndoState {
-  kind: "delete" | "done" | "create" | "update";
-  item: HeroItem;
-}
-
-interface MutationResult {
-  ok: boolean;
-  message: string;
-}
-
-interface ProjectRow {
-  id: string;
-  user_id: string;
-  name: string;
-  tone: ProjectTone;
-  created_at: string;
-}
-
-interface ItemRow {
-  id: string;
-  user_id: string;
-  title: string;
-  type: HeroItemType;
-  status: HeroStatus;
-  due_at: string;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  url: string | null;
-  project_id: string | null;
-  is_recurring_daily: boolean;
-  is_starred: boolean | null;
-  broken_down_from_id: string | null;
-  original_title: string | null;
-}
-
-export const legacyShortcutHints = [
-  { key: "N", description: "Quick add" },
-  { key: "J / K", description: "Move focus" },
-  { key: "D", description: "Mark selected done" },
-  { key: "Delete", description: "Delete selected" },
-  { key: "Shift + E", description: "Edit selected item" },
-  { key: "Z / U", description: "Undo last action" },
-];
-
-export const toneClassMap: Record<ProjectTone, string> = {
-  moss: "bg-white text-black border-black/20",
-  slate: "bg-[#efefef] text-black border-black/15",
-  amber: "bg-[#dcdcdc] text-black border-black/15",
-  clay: "bg-[#cfcfcf] text-black border-black/15",
-  ink: "bg-black text-white border-black",
+export {
+  MAX_STARRED_TASKS,
+  legacyShortcutHints,
+  toneClassMap,
+  toneColorMap,
+  toneLabelMap,
+  type CaptureDraft,
+  type HeroItem,
+  type HeroItemType,
+  type HeroProject,
+  type HeroStatus,
+  type HeroUser,
+  type ParsedCaptureInput,
+  type ProjectTone,
 };
-
-export const toneColorMap: Record<ProjectTone, string> = {
-  moss: "#5b8c5a",
-  slate: "#4f6d8a",
-  amber: "#c58b1c",
-  clay: "#b86464",
-  ink: "#111111",
-};
-
-export const toneLabelMap: Record<ProjectTone, string> = {
-  moss: "Green",
-  slate: "Blue",
-  amber: "Gold",
-  clay: "Rose",
-  ink: "Black",
-};
-
-interface HeroPreferences {
-  defaultProjectId?: string;
-}
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
@@ -210,96 +128,6 @@ const supabase =
         },
       })
     : null;
-
-const orderedTones: ProjectTone[] = ["moss", "slate", "amber", "clay", "ink"];
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isUuid(value?: string | null): value is string {
-  return Boolean(value && uuidPattern.test(value));
-}
-
-function createUuidFallback() {
-  const bytes = new Uint8Array(16);
-
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-function createRecordId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-
-  return createUuidFallback();
-}
-
-function sanitizeProjectId(projectId?: string | null) {
-  return isUuid(projectId) ? projectId : undefined;
-}
-
-function normalizeSnapshotIds(snapshot: HeroSnapshot): HeroSnapshot {
-  const projectIdMap = new Map(
-    snapshot.projects.map((project) => [project.id, isUuid(project.id) ? project.id : createRecordId()] as const),
-  );
-  const itemIdMap = new Map(
-    snapshot.items.map((item) => [item.id, isUuid(item.id) ? item.id : createRecordId()] as const),
-  );
-
-  let changed = false;
-
-  const projects = snapshot.projects.map((project) => {
-    const nextId = projectIdMap.get(project.id) ?? project.id;
-    if (nextId !== project.id) changed = true;
-    return nextId === project.id ? project : { ...project, id: nextId };
-  });
-
-  const items = snapshot.items.map((item) => {
-    const nextId = itemIdMap.get(item.id) ?? item.id;
-    const nextProjectId = item.projectId
-      ? projectIdMap.get(item.projectId) ?? sanitizeProjectId(item.projectId)
-      : undefined;
-    const nextBrokenDownFromId = item.brokenDownFromId
-      ? itemIdMap.get(item.brokenDownFromId) ?? (isUuid(item.brokenDownFromId) ? item.brokenDownFromId : undefined)
-      : undefined;
-
-    if (nextId !== item.id || nextProjectId !== item.projectId || nextBrokenDownFromId !== item.brokenDownFromId) {
-      changed = true;
-    }
-
-    return {
-      ...item,
-      id: nextId,
-      projectId: nextProjectId,
-      brokenDownFromId: nextBrokenDownFromId,
-    };
-  });
-
-  return changed ? { projects, items } : snapshot;
-}
-
-function ensureRemoteSafeProject(project: HeroProject): HeroProject {
-  return isUuid(project.id) ? project : { ...project, id: createRecordId() };
-}
-
-function ensureRemoteSafeItem(item: HeroItem): HeroItem {
-  return {
-    ...item,
-    id: isUuid(item.id) ? item.id : createRecordId(),
-    projectId: sanitizeProjectId(item.projectId),
-    brokenDownFromId: isUuid(item.brokenDownFromId) ? item.brokenDownFromId : undefined,
-  };
-}
 
 function storageKey(userId: string) {
   return `hero-web::snapshot::${userId}`;
@@ -647,89 +475,6 @@ export function previewCaptureInput(input: string) {
   if (!parsed) return "";
 
   return `Wake up ${formatPreviewFromInput(parsed.matchedText)}.`;
-}
-
-function mapProjectRow(row: ProjectRow): HeroProject {
-  return {
-    id: row.id,
-    name: row.name,
-    tone: row.tone,
-    createdAt: row.created_at,
-  };
-}
-
-function mapItemRow(row: ItemRow): HeroItem {
-  return {
-    id: row.id,
-    title: row.title,
-    type: row.type,
-    status: row.status,
-    dueAt: row.due_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    completedAt: row.completed_at ?? undefined,
-    url: row.url ?? undefined,
-    projectId: row.project_id ?? undefined,
-    isRecurringDaily: row.is_recurring_daily,
-    isStarred: row.is_starred ?? false,
-    brokenDownFromId: row.broken_down_from_id ?? undefined,
-    originalTitle: row.original_title ?? undefined,
-  };
-}
-
-function toProjectInsert(project: HeroProject, userId: string) {
-  const safeProject = ensureRemoteSafeProject(project);
-
-  return {
-    user_id: userId,
-    name: safeProject.name,
-    tone: safeProject.tone,
-    created_at: safeProject.createdAt,
-  };
-}
-
-function toItemInsert(item: HeroItem, userId: string) {
-  const safeItem = ensureRemoteSafeItem(item);
-
-  return {
-    id: safeItem.id,
-    user_id: userId,
-    title: safeItem.title,
-    type: safeItem.type,
-    status: safeItem.status,
-    due_at: safeItem.dueAt,
-    created_at: safeItem.createdAt,
-    updated_at: safeItem.updatedAt,
-    completed_at: safeItem.completedAt ?? null,
-    url: safeItem.url ?? null,
-    project_id: safeItem.projectId ?? null,
-    is_recurring_daily: safeItem.isRecurringDaily ?? false,
-    is_starred: safeItem.isStarred ?? false,
-    broken_down_from_id: safeItem.brokenDownFromId ?? null,
-    original_title: safeItem.originalTitle ?? null,
-  };
-}
-
-function toItemPatch(patch: Partial<HeroItem>) {
-  const mapped: Record<string, unknown> = {};
-
-  if (patch.title !== undefined) mapped.title = patch.title;
-  if (patch.type !== undefined) mapped.type = patch.type;
-  if (patch.status !== undefined) mapped.status = patch.status;
-  if (patch.dueAt !== undefined) mapped.due_at = patch.dueAt;
-  if (patch.createdAt !== undefined) mapped.created_at = patch.createdAt;
-  if (patch.updatedAt !== undefined) mapped.updated_at = patch.updatedAt;
-  if (patch.completedAt !== undefined) mapped.completed_at = patch.completedAt ?? null;
-  if (patch.url !== undefined) mapped.url = patch.url ?? null;
-  if (patch.projectId !== undefined) mapped.project_id = sanitizeProjectId(patch.projectId) ?? null;
-  if (patch.isRecurringDaily !== undefined) mapped.is_recurring_daily = patch.isRecurringDaily;
-  if (patch.isStarred !== undefined) mapped.is_starred = patch.isStarred ?? false;
-  if (patch.brokenDownFromId !== undefined) {
-    mapped.broken_down_from_id = isUuid(patch.brokenDownFromId) ? patch.brokenDownFromId : null;
-  }
-  if (patch.originalTitle !== undefined) mapped.original_title = patch.originalTitle ?? null;
-
-  return mapped;
 }
 
 async function getSupabaseUserFromSession(session: Session | null): Promise<HeroUser | null> {
