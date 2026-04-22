@@ -329,6 +329,11 @@ export default function Home() {
   } | null>(null);
   const [holdingDoneItemId, setHoldingDoneItemId] = useState<string | null>(null);
   const [confettiBursts, setConfettiBursts] = useState<Array<{ id: string; x: number; y: number }>>([]);
+  // Keys of in-flight per-item mutations, e.g. "done:<uuid>". Buttons disable
+  // while the key is present so the user can't double-submit a mark-done while
+  // the DB write is still pending, and markDone's confetti / row animation
+  // only fire once the await resolves — no optimistic UI.
+  const [pendingMutations, setPendingMutations] = useState<Set<string>>(() => new Set());
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
@@ -534,7 +539,6 @@ export default function Home() {
   async function submitCapture(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (captureSaving) {
-      console.log("[hero][submit] blocked: captureSaving already true");
       toast("Still saving — hang on a sec.", { duration: 2000 });
       return;
     }
@@ -552,9 +556,7 @@ export default function Home() {
       return;
     }
 
-    console.log("[hero][submit] start", { parsed: !!parsed, length: trimmed.length });
     setCaptureSaving(true);
-    const submitStartedAt = performance.now();
     try {
       const result = parsed
         ? await hero.saveDraft({
@@ -571,11 +573,6 @@ export default function Home() {
             projectId,
           });
 
-      console.log(
-        "[hero][submit] saveDraft returned",
-        { ok: result.ok, message: result.message },
-        `${Math.round(performance.now() - submitStartedAt)}ms`,
-      );
       if (!result.ok) {
         toast.error(result.message);
         return;
@@ -586,17 +583,8 @@ export default function Home() {
       setSelectionDismissed(false);
       setPendingDefaultCapture(false);
     } catch (error) {
-      console.error(
-        "[hero][submit] saveDraft threw",
-        `${Math.round(performance.now() - submitStartedAt)}ms`,
-        error,
-      );
       toast.error(error instanceof Error ? error.message : "Could not save task. Try again.");
     } finally {
-      console.log(
-        "[hero][submit] finally, clearing captureSaving",
-        `${Math.round(performance.now() - submitStartedAt)}ms`,
-      );
       setCaptureSaving(false);
     }
   }
@@ -619,22 +607,6 @@ export default function Home() {
     }, 1000);
   }
 
-  function spawnConfettiBurst(itemId: string) {
-    const btn = doneButtonRefs.current.get(itemId);
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return;
-    const burst = {
-      id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
-    };
-    setConfettiBursts((prev) => [...prev, burst]);
-    window.setTimeout(() => {
-      setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
-    }, 800);
-  }
-
   function clearLeavingTimers() {
     if (celebrateTimerRef.current !== null) {
       window.clearTimeout(celebrateTimerRef.current);
@@ -652,37 +624,67 @@ export default function Home() {
       setEditItemId(null);
       blurActiveElement();
     }
+
+    const key = `done:${itemId}`;
+    if (pendingMutations.has(key)) return;
+
+    // Capture the row and button position BEFORE awaiting the mutation.
+    // Once the mutation resolves and hero.items updates, the item leaves
+    // the upcoming list and its button unmounts — the post-success
+    // animation has to reference values frozen from the pre-mutation state.
     const originalIndex = displayRows.findIndex((r) => r.item.id === itemId);
     const row = originalIndex >= 0 ? displayRows[originalIndex] : null;
-    if (!row) {
+    const btn = doneButtonRefs.current.get(itemId);
+    const rect = btn?.getBoundingClientRect();
+    const burstPosition =
+      rect && (rect.width > 0 || rect.height > 0)
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : null;
+
+    setPendingMutations((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+
+    try {
       const result = await hero.markDone(itemId);
-      if (!result.ok) return toast.error(result.message);
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+
+      if (row && burstPosition) {
+        clearLeavingTimers();
+        const burst = {
+          id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          x: burstPosition.x,
+          y: burstPosition.y,
+        };
+        setConfettiBursts((prev) => [...prev, burst]);
+        window.setTimeout(() => {
+          setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
+        }, 800);
+        setLeavingRow({ row, originalIndex, phase: "celebrate" });
+        celebrateTimerRef.current = window.setTimeout(() => {
+          celebrateTimerRef.current = null;
+          setLeavingRow((prev) =>
+            prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev,
+          );
+          dispatchTimerRef.current = window.setTimeout(() => {
+            dispatchTimerRef.current = null;
+            setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
+          }, 350);
+        }, 450);
+      }
       showActionToast(result.message);
-      return;
+    } finally {
+      setPendingMutations((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
-
-    clearLeavingTimers();
-    spawnConfettiBurst(itemId);
-    setLeavingRow({ row, originalIndex, phase: "celebrate" });
-
-    const mutation = hero.markDone(itemId);
-
-    celebrateTimerRef.current = window.setTimeout(() => {
-      celebrateTimerRef.current = null;
-      setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev));
-      dispatchTimerRef.current = window.setTimeout(() => {
-        dispatchTimerRef.current = null;
-        setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
-      }, 350);
-    }, 450);
-
-    const result = await mutation;
-    if (!result.ok) {
-      clearLeavingTimers();
-      setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
-      return toast.error(result.message);
-    }
-    showActionToast(result.message);
   }
 
   async function removeItem(itemId: string) {
