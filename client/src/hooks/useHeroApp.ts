@@ -11,13 +11,10 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import {
   MAX_STARRED_TASKS,
   createRecordId,
-  ensureRemoteSafeItem,
-  ensureRemoteSafeProject,
   isUuid,
   legacyShortcutHints,
   mapItemRow,
   mapProjectRow,
-  normalizeSnapshotIds,
   orderedTones,
   sanitizeProjectId,
   toItemInsert,
@@ -29,7 +26,6 @@ import {
   type CaptureDraft,
   type HeroItem,
   type HeroItemType,
-  type HeroPreferences,
   type HeroProject,
   type HeroSnapshot,
   type HeroStatus,
@@ -41,6 +37,14 @@ import {
   type ProjectTone,
   type UndoState,
 } from "@/lib/heroStore.types";
+import {
+  createSeedSnapshot,
+  getDemoUser,
+  persistLocalSnapshot,
+  persistPreferences,
+  readLocalSnapshot,
+  readPreferences,
+} from "@/lib/heroStore.local";
 
 export {
   MAX_STARRED_TASKS,
@@ -129,42 +133,6 @@ const supabase =
       })
     : null;
 
-function storageKey(userId: string) {
-  return `hero-web::snapshot::${userId}`;
-}
-
-function preferencesKey(userId: string) {
-  return `hero-web::prefs::${userId}`;
-}
-
-function readSerialized(userId: string): HeroSnapshot | null {
-  const raw = window.localStorage.getItem(storageKey(userId));
-  if (!raw) return null;
-  try {
-    return normalizeSnapshotIds(JSON.parse(raw) as HeroSnapshot);
-  } catch {
-    return null;
-  }
-}
-
-function persistSnapshot(userId: string, snapshot: HeroSnapshot) {
-  window.localStorage.setItem(storageKey(userId), JSON.stringify(snapshot));
-}
-
-function readPreferences(userId: string): HeroPreferences {
-  const raw = window.localStorage.getItem(preferencesKey(userId));
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw) as HeroPreferences;
-  } catch {
-    return {};
-  }
-}
-
-function persistPreferences(userId: string, preferences: HeroPreferences) {
-  window.localStorage.setItem(preferencesKey(userId), JSON.stringify(preferences));
-}
-
 function resolveDefaultProjectId(projects: HeroProject[], preferredProjectId?: string | null) {
   const preferred = sanitizeProjectId(preferredProjectId);
   if (preferred && projects.some((project) => project.id === preferred)) {
@@ -172,85 +140,6 @@ function resolveDefaultProjectId(projects: HeroProject[], preferredProjectId?: s
   }
 
   return projects[0]?.id ?? null;
-}
-
-function createSeedProjects(): HeroProject[] {
-  const now = new Date().toISOString();
-  return [
-    { id: createRecordId(), name: "Personal", tone: "moss", createdAt: now },
-    { id: createRecordId(), name: "Work", tone: "slate", createdAt: now },
-    { id: createRecordId(), name: "Reading", tone: "amber", createdAt: now },
-  ];
-}
-
-function offset(hours: number) {
-  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
-}
-
-function createSeedItems(projects: HeroProject[]): HeroItem[] {
-  return [
-    {
-      id: createRecordId(),
-      title: "Write the launch plan for Hero Web",
-      type: "task",
-      status: "upcoming",
-      dueAt: offset(-2),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      projectId: projects[1]?.id,
-      originalTitle: "Write the launch plan for Hero Web",
-    },
-    {
-      id: createRecordId(),
-      title: "Renew passport before summer travel",
-      type: "task",
-      status: "upcoming",
-      dueAt: offset(18),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      projectId: projects[0]?.id,
-      originalTitle: "Renew passport before summer travel",
-    },
-    {
-      id: createRecordId(),
-      title: "Read that essay on quiet software tools",
-      type: "link",
-      url: "https://example.com/quiet-tools",
-      status: "upcoming",
-      dueAt: offset(42),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      projectId: projects[2]?.id,
-    },
-    {
-      id: createRecordId(),
-      title: "Send proposal revision to Martina",
-      type: "task",
-      status: "done",
-      dueAt: offset(-22),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      completedAt: offset(-8),
-      projectId: projects[1]?.id,
-    },
-  ];
-}
-
-function createSeedSnapshot(): HeroSnapshot {
-  const projects = createSeedProjects();
-  return {
-    projects,
-    items: createSeedItems(projects),
-  };
-}
-
-function getDemoUser(): HeroUser {
-  return {
-    id: "demo-user",
-    name: "Demo User",
-    email: "demo@hero.local",
-    mode: "demo",
-  };
 }
 
 function getHeroTimeZone() {
@@ -568,7 +457,7 @@ export function useHeroApp() {
     setSelectedId(nextSelectedIdFromItems(snapshot.items));
     setDefaultProjectIdState(resolvedDefaultProjectId);
     if (persistLocally) {
-      persistSnapshot(userId, snapshot);
+      persistLocalSnapshot(userId, snapshot);
       persistPreferences(userId, { defaultProjectId: resolvedDefaultProjectId ?? undefined });
     }
   }, []);
@@ -576,9 +465,9 @@ export function useHeroApp() {
   const loadUserSnapshot = useCallback(
     async (nextUser: HeroUser) => {
       if (nextUser.mode === "demo") {
-        const stored = readSerialized(nextUser.id) ?? createSeedSnapshot();
-        if (!readSerialized(nextUser.id)) {
-          persistSnapshot(nextUser.id, stored);
+        const stored = readLocalSnapshot(nextUser.id) ?? createSeedSnapshot();
+        if (!readLocalSnapshot(nextUser.id)) {
+          persistLocalSnapshot(nextUser.id, stored);
         }
         applySnapshot(stored, nextUser.id);
         setRemoteReady(false);
@@ -592,8 +481,8 @@ export function useHeroApp() {
         setRemoteReady(true);
         setStatusMessage("Google sign-in and Supabase sync are live.");
       } catch {
-        const localFallback = readSerialized(nextUser.id) ?? { projects: [], items: [] };
-        applySnapshot(localFallback, nextUser.id, !readSerialized(nextUser.id));
+        const localFallback = readLocalSnapshot(nextUser.id) ?? { projects: [], items: [] };
+        applySnapshot(localFallback, nextUser.id, !readLocalSnapshot(nextUser.id));
         setRemoteReady(false);
         setStatusMessage(
           "Google sign-in is live, but database tables are not ready yet. Hero is using a private local fallback until the Supabase schema is applied.",
@@ -721,7 +610,7 @@ export function useHeroApp() {
       setSelectedId(nextSelectedIdFromItems(nextItems));
       setDefaultProjectIdState(resolvedDefaultProjectId);
       if (user) {
-        persistSnapshot(user.id, { projects: nextProjects, items: nextItems });
+        persistLocalSnapshot(user.id, { projects: nextProjects, items: nextItems });
         persistPreferences(user.id, { defaultProjectId: resolvedDefaultProjectId ?? undefined });
       }
     },
