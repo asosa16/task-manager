@@ -6,7 +6,9 @@ Design note for this file:
 */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as chrono from "chrono-node";
-import { createClient, type Session } from "@supabase/supabase-js";
+import { type Session } from "@supabase/supabase-js";
+
+import { supabase } from "@/lib/heroAuth";
 
 import {
   MAX_STARRED_TASKS,
@@ -61,77 +63,6 @@ export {
   type ParsedCaptureInput,
   type ProjectTone,
 };
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
-
-// Single-attempt fetch with a 10s total timeout that covers headers AND body
-// read. The timer stays armed after fetch() resolves so a stalled response
-// body (Chrome's HTTP/2 half-dead symptom) also gets aborted — otherwise
-// supabase-js's internal `.json()` can await forever and the outer await in
-// saveDraft/updateItem never settles, which leaves captureSaving stuck true
-// and the UI showing "Saving as …" indefinitely.
-let supabaseFetchSeq = 0;
-const supabaseFetch: typeof fetch = async (input, init) => {
-  const reqId = ++supabaseFetchSeq;
-  const method = (init?.method ?? "GET").toUpperCase();
-  const url =
-    typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-  const startedAt = performance.now();
-  const since = () => `${Math.round(performance.now() - startedAt)}ms`;
-  console.log("[hero][fetch][req]", reqId, method, url);
-
-  const externalSignal = init?.signal ?? null;
-  if (externalSignal?.aborted) {
-    console.warn("[hero][fetch][pre-aborted]", reqId, method, url);
-    throw externalSignal.reason ?? new DOMException("Aborted", "AbortError");
-  }
-
-  const controller = new AbortController();
-  setTimeout(() => {
-    console.warn("[hero][fetch][timeout-fired]", reqId, since(), method, url);
-    controller.abort(new DOMException("Request timed out", "TimeoutError"));
-  }, 10000);
-  const onExternalAbort = () => controller.abort(externalSignal?.reason);
-  externalSignal?.addEventListener("abort", onExternalAbort);
-
-  try {
-    const response = await fetch(input, { ...init, signal: controller.signal });
-    console.log("[hero][fetch][res]", reqId, response.status, since(), url);
-    return response;
-  } catch (err) {
-    console.error("[hero][fetch][err]", reqId, since(), method, url, err);
-    throw err;
-  } finally {
-    externalSignal?.removeEventListener("abort", onExternalAbort);
-  }
-};
-
-const supabase =
-  supabaseUrl && supabaseKey
-    ? createClient(supabaseUrl, supabaseKey, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true,
-          // Disable Navigator LockManager coordination on the auth session.
-          // After laptop sleep/wake in Chrome, the LockManager callback that
-          // holds the "gotrue" lock can get suspended and never resumes, which
-          // leaves the lock held indefinitely. Every subsequent data call goes
-          // through fetchWithAuth → _getAccessToken → auth.getSession, all of
-          // which try to acquire that same lock — and hang before any fetch is
-          // issued. That's the stuck "Saving as …" state. A pass-through lock
-          // removes the wedge entirely. The only thing we give up is cross-tab
-          // coordination of token refreshes, which matters only if two tabs
-          // are open concurrently; at worst they'd each do their own refresh.
-          lock: (_name, _acquireTimeout, fn) => fn(),
-        },
-        global: {
-          fetch: supabaseFetch,
-        },
-      })
-    : null;
 
 function resolveDefaultProjectId(projects: HeroProject[], preferredProjectId?: string | null) {
   const preferred = sanitizeProjectId(preferredProjectId);
