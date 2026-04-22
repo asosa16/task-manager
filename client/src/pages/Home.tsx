@@ -1258,7 +1258,21 @@ export default function Home() {
                           </div>
                           <select
                             value={editProjectId}
-                            onChange={(event) => setEditProjectId(event.target.value)}
+                            onChange={(event) => {
+                              const nextProjectId = event.target.value;
+                              setEditProjectId(nextProjectId);
+                              void (async () => {
+                                const title = editValue.trim() || row.item.title;
+                                const result = await hero.editCapture(row.item.id, title, nextProjectId || fallbackProjectId || undefined);
+                                if (!result.ok) {
+                                  toast.error(result.message);
+                                  return;
+                                }
+                                if (result.message !== "No changes.") {
+                                  showActionToast(result.message);
+                                }
+                              })();
+                            }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter") {
                                 event.preventDefault();
