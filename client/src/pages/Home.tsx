@@ -1254,10 +1254,30 @@ export default function Home() {
                             />
                             {editParsed ? (
                               <span className="mt-1 block text-[11px] text-black/45">Will save as “{editParsed.title}” · {editPreview}</span>
-                            ) : projectName ? (
-                              <span className="mt-1 block text-[11px] uppercase tracking-[0.14em] text-black/45">{projectName}</span>
                             ) : null}
                           </div>
+                          <select
+                            value={editProjectId}
+                            onChange={(event) => setEditProjectId(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void submitRename(row.item.id);
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                setEditValue(row.item.title);
+                                exitInlineEdit();
+                              }
+                            }}
+                            className="min-h-8 shrink-0 border border-black/25 bg-white px-2 text-[11px] uppercase tracking-[0.14em] text-black/70 outline-none"
+                          >
+                            {hero.projects.map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.name}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       ) : (
                         <button
