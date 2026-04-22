@@ -1207,9 +1207,6 @@ export default function Home() {
                     <div className="min-w-0">
                       <div className={`flex items-center justify-between gap-2 sm:hidden ${isPastDue ? "text-red-800" : "text-black/55"}`}>
                         <span className={`text-[11px] ${isPastDue ? "font-semibold" : ""}`}>{dueLabelForList(row.item.dueAt)}</span>
-                        {projectName ? (
-                          <span className="text-[10px] uppercase tracking-[0.14em] text-black/45">{projectName}</span>
-                        ) : null}
                       </div>
                       {isEditingRow ? (
                         <div className="mt-1 flex w-full items-start gap-3 sm:mt-0">
@@ -1323,7 +1320,6 @@ export default function Home() {
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="hero-title-text block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
-                            {projectName ? <span className="mt-1 hidden text-[11px] uppercase tracking-[0.14em] text-black/45 sm:block">{projectName}</span> : null}
                           </span>
                           {isLeavingRow ? (
                             <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
