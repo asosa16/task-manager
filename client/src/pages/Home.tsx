@@ -5,7 +5,7 @@ Design note for this file:
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
 */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { Star } from "lucide-react";
@@ -1320,7 +1320,14 @@ export default function Home() {
                           onClick={() => {
                             selectItem(row.item.id, { fromListNavigation: true });
                             if (window.matchMedia("(max-width: 639px)").matches) {
-                              void commitInlineEditIfNeeded().then(() => beginItemEdit(row.item));
+                              void commitInlineEditIfNeeded();
+                              flushSync(() => beginItemEdit(row.item));
+                              const input = editInputRef.current;
+                              if (input) {
+                                input.focus();
+                                const end = input.value.length;
+                                input.setSelectionRange(end, end);
+                              }
                             }
                           }}
                           onDoubleClick={() => beginItemEdit(row.item)}
