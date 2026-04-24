@@ -1317,7 +1317,12 @@ export default function Home() {
                             event.preventDefault();
                             void applyMove(sourceId, row.item.id, "chain");
                           }}
-                          onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
+                          onClick={() => {
+                            selectItem(row.item.id, { fromListNavigation: true });
+                            if (window.matchMedia("(max-width: 639px)").matches) {
+                              void commitInlineEditIfNeeded().then(() => beginItemEdit(row.item));
+                            }
+                          }}
                           onDoubleClick={() => beginItemEdit(row.item)}
                           className="mt-1 flex w-full items-start gap-3 text-left sm:mt-0"
                         >
@@ -1470,7 +1475,7 @@ export default function Home() {
                         type="button"
                         disabled={actionsDimmed}
                         onClick={() => setMenuItemId((current) => (current === row.item.id ? null : row.item.id))}
-                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed"
+                        className="hidden h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed sm:inline-flex"
                         aria-label="More actions"
                       >
                         …
