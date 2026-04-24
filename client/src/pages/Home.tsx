@@ -1289,6 +1289,13 @@ export default function Home() {
                               </option>
                             ))}
                           </select>
+                          <button
+                            type="button"
+                            onClick={() => void submitRename(row.item.id)}
+                            className="min-h-8 shrink-0 border border-black bg-black px-3 text-[11px] uppercase tracking-[0.14em] text-white outline-none sm:hidden"
+                          >
+                            Save
+                          </button>
                         </div>
                       ) : (
                         <button
