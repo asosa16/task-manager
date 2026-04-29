@@ -326,9 +326,12 @@ export default function Home() {
     row: DisplayRow;
     originalIndex: number;
     phase: "celebrate" | "dispatch";
+    kind: "done" | "delete";
   } | null>(null);
   const [holdingDoneItemId, setHoldingDoneItemId] = useState<string | null>(null);
-  const [confettiBursts, setConfettiBursts] = useState<Array<{ id: string; x: number; y: number }>>([]);
+  const [confettiBursts, setConfettiBursts] = useState<
+    Array<{ id: string; x: number; y: number; kind: "done" | "delete" }>
+  >([]);
   // Keys of in-flight per-item mutations, e.g. "done:<uuid>". Buttons disable
   // while the key is present so the user can't double-submit a mark-done while
   // the DB write is still pending, and markDone's confetti / row animation
@@ -344,6 +347,7 @@ export default function Home() {
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const hasAutoFocusedCaptureRef = useRef(false);
   const doneButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
   const holdDoneTimerRef = useRef<number | null>(null);
   const celebrateTimerRef = useRef<number | null>(null);
   const dispatchTimerRef = useRef<number | null>(null);
@@ -660,12 +664,13 @@ export default function Home() {
           id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           x: burstPosition.x,
           y: burstPosition.y,
+          kind: "done" as const,
         };
         setConfettiBursts((prev) => [...prev, burst]);
         window.setTimeout(() => {
           setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
         }, 800);
-        setLeavingRow({ row, originalIndex, phase: "celebrate" });
+        setLeavingRow({ row, originalIndex, phase: "celebrate", kind: "done" });
         celebrateTimerRef.current = window.setTimeout(() => {
           celebrateTimerRef.current = null;
           setLeavingRow((prev) =>
@@ -688,9 +693,72 @@ export default function Home() {
   }
 
   async function removeItem(itemId: string) {
-    const result = await hero.removeItem(itemId);
-    if (!result.ok) return toast.error(result.message);
-    showActionToast(result.message);
+    if (editItemId === itemId) {
+      setEditItemId(null);
+      blurActiveElement();
+    }
+
+    const key = `delete:${itemId}`;
+    if (pendingMutations.has(key)) return;
+
+    // Same pre-mutation snapshot pattern as markDone: capture row + button rect
+    // before awaiting, because once the store resolves the row unmounts and the
+    // delete button's bounding rect is gone — the post-success animation
+    // references frozen pre-mutation values.
+    const originalIndex = displayRows.findIndex((r) => r.item.id === itemId);
+    const row = originalIndex >= 0 ? displayRows[originalIndex] : null;
+    const btn = deleteButtonRefs.current.get(itemId);
+    const rect = btn?.getBoundingClientRect();
+    const burstPosition =
+      rect && (rect.width > 0 || rect.height > 0)
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : null;
+
+    setPendingMutations((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+
+    try {
+      const result = await hero.removeItem(itemId);
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+
+      if (row && burstPosition) {
+        clearLeavingTimers();
+        const burst = {
+          id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          x: burstPosition.x,
+          y: burstPosition.y,
+          kind: "delete" as const,
+        };
+        setConfettiBursts((prev) => [...prev, burst]);
+        window.setTimeout(() => {
+          setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
+        }, 800);
+        setLeavingRow({ row, originalIndex, phase: "celebrate", kind: "delete" });
+        celebrateTimerRef.current = window.setTimeout(() => {
+          celebrateTimerRef.current = null;
+          setLeavingRow((prev) =>
+            prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev,
+          );
+          dispatchTimerRef.current = window.setTimeout(() => {
+            dispatchTimerRef.current = null;
+            setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
+          }, 350);
+        }, 450);
+      }
+      showActionToast(result.message);
+    } finally {
+      setPendingMutations((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
   }
 
   async function toggleStar(itemId: string) {
@@ -1162,6 +1230,7 @@ export default function Home() {
               const isCelebratingRow = leavingRow?.phase === "celebrate" && leavingRow.row.item.id === row.item.id;
               const isDispatchingRow = leavingRow?.phase === "dispatch" && leavingRow.row.item.id === row.item.id;
               const isLeavingRow = isCelebratingRow || isDispatchingRow;
+              const leavingKind = isLeavingRow ? leavingRow!.kind : null;
               const isHoldingDoneRow = holdingDoneItemId === row.item.id;
               const isActiveRow = activeItemId === row.item.id;
               const isDimmed = Boolean(activeItemId) && !isActiveRow;
@@ -1175,8 +1244,8 @@ export default function Home() {
               const actionsDimmed = isTyping && !isEditingRow;
               const rowClass = [
                 isSelected ? "bg-black/[0.035]" : "bg-white",
-                isCelebratingRow ? "hero-row-celebrating" : "",
-                isDispatchingRow ? "hero-row-dispatching" : "",
+                isCelebratingRow ? (leavingKind === "delete" ? "hero-row-deleting-celebrate" : "hero-row-celebrating") : "",
+                isDispatchingRow ? (leavingKind === "delete" ? "hero-row-deleting-dispatching" : "hero-row-dispatching") : "",
                 isHoldingDoneRow ? "hero-row-holding-done" : "",
                 isActiveRow ? "hero-tunnel-active" : "",
                 isDimmed ? "hero-tunnel-dim" : "",
@@ -1342,10 +1411,21 @@ export default function Home() {
                           </span>
                           {isLeavingRow ? (
                             <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
-                              <span className="hero-done-burst absolute inset-0 rounded-full bg-emerald-400/60" />
-                              <span className="hero-done-check-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-bold shadow-[0_6px_18px_rgba(5,150,105,0.35)]">
-                                ✓
-                              </span>
+                              {leavingKind === "delete" ? (
+                                <>
+                                  <span className="hero-delete-burst absolute inset-0 rounded-full" />
+                                  <span className="hero-delete-x-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full text-white text-sm font-bold shadow-[0_6px_18px_rgba(220,38,38,0.35)]">
+                                    ✕
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="hero-done-burst absolute inset-0 rounded-full bg-emerald-400/60" />
+                                  <span className="hero-done-check-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-bold shadow-[0_6px_18px_rgba(5,150,105,0.35)]">
+                                    ✓
+                                  </span>
+                                </>
+                              )}
                             </span>
                           ) : null}
                         </button>
@@ -1471,7 +1551,11 @@ export default function Home() {
                       </button>
                       <button
                         type="button"
-                        disabled={actionsDimmed}
+                        ref={(el) => {
+                          if (el) deleteButtonRefs.current.set(row.item.id, el);
+                          else deleteButtonRefs.current.delete(row.item.id);
+                        }}
+                        disabled={actionsDimmed || isLeavingRow}
                         onClick={() => void removeItem(row.item.id)}
                         className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed"
                         aria-label="Delete task"
@@ -1540,7 +1624,7 @@ export default function Home() {
               {confettiBursts.map((burst) => (
                 <span
                   key={burst.id}
-                  className="hero-done-confetti"
+                  className={burst.kind === "delete" ? "hero-delete-confetti" : "hero-done-confetti"}
                   style={{ left: `${burst.x}px`, top: `${burst.y}px` }}
                 >
                   <span /><span /><span /><span /><span /><span /><span /><span />

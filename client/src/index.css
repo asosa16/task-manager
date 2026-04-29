@@ -325,6 +325,83 @@ Design note for this file:
   background-color: hsl(143 85% 80%) !important;
 }
 
+@keyframes hero-delete-celebrate {
+  0% {
+    background-color: hsl(0 85% 96% / 0);
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(220, 38, 38, 0);
+  }
+  30% {
+    background-color: hsl(0 85% 91%);
+    transform: scale(1.012);
+    box-shadow: 0 10px 28px rgba(220, 38, 38, 0.18);
+  }
+  100% {
+    background-color: hsl(0 85% 93%);
+    transform: scale(1.008);
+    box-shadow: 0 6px 20px rgba(220, 38, 38, 0.14);
+  }
+}
+
+@keyframes hero-delete-dispatch {
+  0% {
+    max-height: 400px;
+    opacity: 1;
+    transform: translateY(0) scale(1.008);
+    background-color: hsl(0 85% 93%);
+  }
+  100% {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-8px) scale(1);
+    background-color: hsl(0 85% 93% / 0);
+  }
+}
+
+.hero-row-deleting-celebrate {
+  position: relative;
+  overflow: hidden;
+  z-index: 2;
+  animation: hero-delete-celebrate 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.hero-row-deleting-dispatching {
+  position: relative;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+  animation: hero-delete-dispatch 350ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.hero-row-deleting-celebrate .hero-title-text,
+.hero-row-deleting-dispatching .hero-title-text {
+  position: relative;
+  color: hsl(0 75% 38%);
+}
+
+.hero-row-deleting-celebrate .hero-title-text::after,
+.hero-row-deleting-dispatching .hero-title-text::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background-color: hsl(0 75% 38%);
+  transform-origin: left;
+  animation: hero-done-strike 360ms ease-out forwards;
+}
+
+.hero-delete-x-mark {
+  animation: hero-done-check 520ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  background-color: hsl(0 75% 42%) !important;
+}
+
+.hero-delete-burst {
+  animation: hero-done-burst 620ms ease-out forwards;
+  background-color: hsl(0 80% 80%) !important;
+}
+
 @keyframes hero-done-confetti-pop {
   0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
   20% { opacity: 1; }
@@ -370,6 +447,35 @@ Design note for this file:
 .hero-done-confetti > span:nth-child(6) { background: hsl(10 85% 60%);  --dx: -32px; --dy:  14px; width: 6px; height: 6px; }
 .hero-done-confetti > span:nth-child(7) { background: hsl(160 70% 50%); --dx:  10px; --dy: -34px; width: 5px; height: 5px; }
 .hero-done-confetti > span:nth-child(8) { background: hsl(50 100% 60%); --dx: -18px; --dy: -10px; width: 5px; height: 5px; }
+
+.hero-delete-confetti {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.hero-delete-confetti > span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.3);
+  animation: hero-done-confetti-pop 520ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.hero-delete-confetti > span:nth-child(1) { background: hsl(0 0% 18%);  --dx: -28px; --dy: -24px; width: 7px; height: 7px; }
+.hero-delete-confetti > span:nth-child(2) { background: hsl(0 0% 38%);  --dx:  24px; --dy: -28px; }
+.hero-delete-confetti > span:nth-child(3) { background: hsl(0 0% 56%);  --dx:  32px; --dy:   2px; width: 5px; height: 5px; }
+.hero-delete-confetti > span:nth-child(4) { background: hsl(0 0% 28%);  --dx:  22px; --dy:  24px; }
+.hero-delete-confetti > span:nth-child(5) { background: hsl(0 0% 48%);  --dx:  -6px; --dy:  28px; width: 5px; height: 5px; }
+.hero-delete-confetti > span:nth-child(6) { background: hsl(0 0% 22%);  --dx: -30px; --dy:  12px; width: 7px; height: 7px; }
+.hero-delete-confetti > span:nth-child(7) { background: hsl(0 0% 64%);  --dx:   8px; --dy: -32px; width: 4px; height: 4px; }
+.hero-delete-confetti > span:nth-child(8) { background: hsl(0 0% 34%);  --dx: -16px; --dy:  -8px; width: 4px; height: 4px; }
 
 @keyframes hero-done-hold-fill {
   from { transform: scaleX(0); }
