@@ -43,6 +43,9 @@ export default function Done() {
               <button type="button" onClick={() => navigate("/")} className="hover:text-black">
                 Today
               </button>
+              <button type="button" onClick={() => navigate("/tomorrow")} className="hover:text-black">
+                Tomorrow
+              </button>
               <button type="button" onClick={() => navigate("/all")} className="hover:text-black">
                 All
               </button>

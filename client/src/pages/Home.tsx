@@ -25,7 +25,7 @@ const STAR_GOLD = "#c8941f";
 const heroLogo =
   "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
 
-const primaryRouteOrder = ["/", "/all", "/done"] as const;
+const primaryRouteOrder = ["/", "/tomorrow", "/all", "/done"] as const;
 const projectToneOptions: ProjectTone[] = ["moss", "slate", "amber", "clay", "ink"];
 
 function getPrimaryRouteTarget(currentPath: string, direction: 1 | -1) {
@@ -36,7 +36,7 @@ function getPrimaryRouteTarget(currentPath: string, direction: 1 | -1) {
   return primaryRouteOrder[(index + direction + primaryRouteOrder.length) % primaryRouteOrder.length];
 }
 
-type ListMode = "today" | "all";
+type ListMode = "today" | "tomorrow" | "all";
 type MoveMode = "after" | "chain";
 
 type DisplayRow = {
@@ -56,6 +56,17 @@ function isDueTodayOrOverdue(input: string) {
   const endOfToday = new Date();
   endOfToday.setHours(23, 59, 59, 999);
   return date.getTime() <= endOfToday.getTime();
+}
+
+function isDueTomorrow(input: string) {
+  const date = new Date(input);
+  const startOfTomorrow = new Date();
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+  startOfTomorrow.setHours(0, 0, 0, 0);
+  const endOfTomorrow = new Date(startOfTomorrow);
+  endOfTomorrow.setHours(23, 59, 59, 999);
+  const time = date.getTime();
+  return time >= startOfTomorrow.getTime() && time <= endOfTomorrow.getTime();
 }
 
 function buildDisplayRows(items: HeroItem[]) {
@@ -210,7 +221,7 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>edit &amp; move through tasks</span><span className="font-semibold">↑ / ↓</span></div>
         <div className="flex items-center justify-between gap-3"><span>save inline edit</span><span className="font-semibold">Enter</span></div>
         <div className="flex items-center justify-between gap-3"><span>exit edit, keep selection</span><span className="font-semibold">Esc</span></div>
-        <div className="flex items-center justify-between gap-3"><span>switch Today / All / Done</span><span className="font-semibold">Tab</span></div>
+        <div className="flex items-center justify-between gap-3"><span>switch Today / Tomorrow / All / Done</span><span className="font-semibold">Tab</span></div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Act on selected task</div>
         <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">⇧⌘D</span></div>
@@ -304,7 +315,8 @@ function AuthShell({
 export default function Home() {
   const hero = useHeroApp();
   const [location, navigate] = useLocation();
-  const listMode: ListMode = location === "/all" ? "all" : "today";
+  const listMode: ListMode =
+    location === "/all" ? "all" : location === "/tomorrow" ? "tomorrow" : "today";
 
   const [captureInput, setCaptureInput] = useState("");
   const [captureProjectId, setCaptureProjectId] = useState("");
@@ -352,10 +364,11 @@ export default function Home() {
   const celebrateTimerRef = useRef<number | null>(null);
   const dispatchTimerRef = useRef<number | null>(null);
 
-  const filteredItems = useMemo(
-    () => (listMode === "today" ? hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt)) : hero.upcomingItems),
-    [hero.upcomingItems, listMode],
-  );
+  const filteredItems = useMemo(() => {
+    if (listMode === "today") return hero.upcomingItems.filter((item) => isDueTodayOrOverdue(item.dueAt));
+    if (listMode === "tomorrow") return hero.upcomingItems.filter((item) => isDueTomorrow(item.dueAt));
+    return hero.upcomingItems;
+  }, [hero.upcomingItems, listMode]);
 
   const displayRows = useMemo(() => buildDisplayRows(filteredItems), [filteredItems]);
   const renderRows = useMemo(() => {
@@ -1019,6 +1032,13 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => navigate("/tomorrow")}
+                  className={listMode === "tomorrow" ? "text-black" : "hover:text-black"}
+                >
+                  Tomorrow
+                </button>
+                <button
+                  type="button"
                   onClick={() => navigate("/all")}
                   className={listMode === "all" ? "text-black" : "hover:text-black"}
                 >
@@ -1581,7 +1601,9 @@ export default function Home() {
               <div className="px-4 py-12 text-sm leading-7 text-black/62">
                 {listMode === "today"
                   ? "Nothing is due today yet. Add one line above, with a task and its wake-up time."
-                  : "No upcoming tasks. Add a task with its wake-up time and it will appear here."}
+                  : listMode === "tomorrow"
+                    ? "Nothing is due tomorrow yet. Add a task with a tomorrow wake-up time and it will appear here."
+                    : "No upcoming tasks. Add a task with its wake-up time and it will appear here."}
               </div>
             ) : null}
           </div>
