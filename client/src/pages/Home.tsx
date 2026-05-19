@@ -567,7 +567,7 @@ export default function Home() {
 
     if (!parsed && !pendingDefaultCapture) {
       setPendingDefaultCapture(true);
-      toast("No wake-up time detected. Add again to use default (tomorrow 8am).", {
+      toast("No wake-up time detected. Add again to use default (in 5 minutes).", {
         duration: 6000,
       });
       return;
@@ -585,7 +585,7 @@ export default function Home() {
           })
         : await hero.saveDraft({
             title: trimmed,
-            dueInput: "tomorrow 8am",
+            dueInput: "in 5 minutes",
             type: "task",
             projectId,
           });
@@ -1221,8 +1221,8 @@ export default function Home() {
               <div>
                 {captureInput.trim()
                   ? pendingDefaultCapture
-                    ? "No wake-up time detected. Add again to save with tomorrow 8am."
-                    : capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am” — or add twice to use tomorrow 8am."
+                    ? "No wake-up time detected. Add again to save with a wake-up time 5 minutes from now."
+                    : capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am” — or add twice to wake up in 5 minutes."
                   : "One line only: task name plus wake-up time."}
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
