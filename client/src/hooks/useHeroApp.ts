@@ -339,18 +339,6 @@ function collectDescendantIds(items: HeroItem[], parentId: string) {
   return descendants;
 }
 
-function getSubtreeTailDueAt(items: HeroItem[], rootId: string) {
-  const descendantIds = collectDescendantIds(items, rootId);
-  const relevantIds = new Set([rootId, ...Array.from(descendantIds)]);
-
-  return items
-    .filter((item) => relevantIds.has(item.id))
-    .reduce((latest, item) => {
-      const current = new Date(item.dueAt).getTime();
-      return current > latest ? current : latest;
-    }, new Date().getTime());
-}
-
 export function useHeroApp() {
   const [user, setUser] = useState<HeroUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -891,8 +879,12 @@ export function useHeroApp() {
     [projects, user],
   );
 
+  // Drop reorder: the dragged task's wake-up time becomes one minute after the
+  // drop target's, which slides it directly below that task in the due-sorted
+  // list. It also adopts the target's chain parent so it lands as a sibling of
+  // the target rather than dangling inside an unrelated chain.
   const moveItem = useCallback(
-    async (itemId: string, targetId: string, mode: "after" | "chain"): Promise<MutationResult> => {
+    async (itemId: string, targetId: string): Promise<MutationResult> => {
       const source = items.find((item) => item.id === itemId);
       const target = items.find((item) => item.id === targetId);
 
@@ -909,19 +901,15 @@ export function useHeroApp() {
         return { ok: false, message: "A task cannot be dropped inside its own chain." };
       }
 
-      const nextDueAt = new Date(getSubtreeTailDueAt(items, target.id) + 60_000).toISOString();
-      const nextParentId = mode === "chain" ? target.id : target.brokenDownFromId;
+      const nextDueAt = new Date(new Date(target.dueAt).getTime() + 60_000).toISOString();
       const result = await updateItem(itemId, {
         dueAt: nextDueAt,
-        brokenDownFromId: nextParentId,
+        brokenDownFromId: target.brokenDownFromId,
       });
 
       if (!result.ok) return result;
       setUndoState({ kind: "update", item: source });
-      return {
-        ok: true,
-        message: mode === "chain" ? `Chained under “${target.title}”.` : `Moved after “${target.title}”.`,
-      };
+      return { ok: true, message: `Moved after “${target.title}”.` };
     },
     [items, updateItem],
   );

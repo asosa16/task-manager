@@ -37,8 +37,6 @@ function getPrimaryRouteTarget(currentPath: string, direction: 1 | -1) {
 }
 
 type ListMode = "today" | "tomorrow" | "all";
-type MoveMode = "after" | "chain";
-
 type DisplayRow = {
   item: HeroItem;
   depth: number;
@@ -232,9 +230,9 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>undo last action (after Esc)</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view, after Esc)</div>
-        <div className="flex items-center justify-between gap-3"><span>pick up / drop the task</span><span className="font-semibold">Space</span></div>
-        <div className="flex items-center justify-between gap-3"><span>drop under another task</span><span className="font-semibold">Enter</span></div>
-        <div className="flex items-center justify-between gap-3"><span>drop after another task</span><span className="font-semibold">⇧Enter</span></div>
+        <div className="flex items-center justify-between gap-3"><span>pick up the task</span><span className="font-semibold">Space</span></div>
+        <div className="flex items-center justify-between gap-3"><span>drop after another task</span><span className="font-semibold">Enter</span></div>
+        <div className="text-[10px] leading-4 text-black/40">Dropping moves the task to one minute after the task above it. Drag a task with the mouse for the same effect.</div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Panels</div>
         <div className="flex items-center justify-between gap-3"><span>toggle this help</span><span className="font-semibold">?</span></div>
@@ -333,6 +331,10 @@ export default function Home() {
   const [rescheduleValue, setRescheduleValue] = useState("tomorrow 9am");
   const [grabbedItemId, setGrabbedItemId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  // The row a dragged task is currently hovering over — highlighted as the
+  // drop target. Dropping onto it sets the dragged task's wake-up time to one
+  // minute after this row's, sliding it directly below.
+  const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [leavingRow, setLeavingRow] = useState<{
     row: DisplayRow;
@@ -424,6 +426,7 @@ export default function Home() {
     setMenuItemId(null);
     setGrabbedItemId(null);
     setDraggedItemId(null);
+    setDragOverItemId(null);
     window.setTimeout(() => {
       captureInputRef.current?.focus();
       captureInputRef.current?.select();
@@ -485,6 +488,7 @@ export default function Home() {
     setRescheduleItemId(null);
     setGrabbedItemId(null);
     setDraggedItemId(null);
+    setDragOverItemId(null);
     setSelectionDismissed(true);
     hero.setSelectedId(null);
     blurActiveElement();
@@ -780,12 +784,13 @@ export default function Home() {
     showActionToast(result.message);
   }
 
-  async function applyMove(itemId: string, targetId: string, mode: MoveMode) {
-    const result = await hero.moveItem(itemId, targetId, mode);
+  async function applyMove(itemId: string, targetId: string) {
+    const result = await hero.moveItem(itemId, targetId);
     if (!result.ok) return toast.error(result.message);
     showActionToast(result.message);
     setGrabbedItemId(null);
     setDraggedItemId(null);
+    setDragOverItemId(null);
   }
 
   async function submitRename(itemId: string) {
@@ -940,7 +945,7 @@ export default function Home() {
       if (event.key === "Enter") {
         if (grabbedItemId && grabbedItemId !== selectedRow.item.id && listMode === "today") {
           event.preventDefault();
-          void applyMove(grabbedItemId, selectedRow.item.id, event.shiftKey ? "after" : "chain");
+          void applyMove(grabbedItemId, selectedRow.item.id);
           return;
         }
       }
@@ -1261,6 +1266,8 @@ export default function Home() {
               const projectTone = project?.tone ?? "ink";
               const canDrop = Boolean((draggedItemId || grabbedItemId) && row.item.id !== draggedItemId && row.item.id !== grabbedItemId);
               const sourceId = draggedItemId || grabbedItemId;
+              const isBeingDragged = draggedItemId === row.item.id;
+              const isDropTarget = canDrop && dragOverItemId === row.item.id && listMode === "today";
               const actionsDimmed = isTyping && !isEditingRow;
               const rowClass = [
                 isSelected ? "bg-black/[0.035]" : "bg-white",
@@ -1270,6 +1277,8 @@ export default function Home() {
                 isActiveRow ? "hero-tunnel-active" : "",
                 isDimmed ? "hero-tunnel-dim" : "",
                 isBystander ? "hero-row-bystander" : "",
+                isBeingDragged ? "hero-row-dragging" : "",
+                isDropTarget ? "hero-row-drop-target" : "",
               ].filter(Boolean).join(" ");
 
               return (
@@ -1278,6 +1287,20 @@ export default function Home() {
                   className={rowClass}
                   onMouseEnter={() => setHoveredItemId(row.item.id)}
                   onMouseLeave={() => setHoveredItemId((current) => (current === row.item.id ? null : current))}
+                  onDragOver={(event) => {
+                    if (!canDrop || listMode !== "today") return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    // Each row claims the highlight as the cursor enters it;
+                    // dragEnd / drop clears it. No onDragLeave — clearing on
+                    // every child boundary crossing makes the marker flicker.
+                    if (dragOverItemId !== row.item.id) setDragOverItemId(row.item.id);
+                  }}
+                  onDrop={(event) => {
+                    if (!sourceId || !canDrop || listMode !== "today") return;
+                    event.preventDefault();
+                    void applyMove(sourceId, row.item.id);
+                  }}
                 >
                   <div className="flex flex-col gap-2 px-3 py-3 sm:grid sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-start sm:gap-3 sm:px-4">
                       <button
@@ -1395,16 +1418,15 @@ export default function Home() {
                               selectItem(row.item.id, { fromListNavigation: true });
                             }
                           }}
-                          onDragStart={() => setDraggedItemId(row.item.id)}
-                          onDragEnd={() => setDraggedItemId(null)}
-                          onDragOver={(event) => {
-                            if (!canDrop || listMode !== "today") return;
-                            event.preventDefault();
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            setMenuItemId(null);
+                            setGrabbedItemId(null);
+                            setDraggedItemId(row.item.id);
                           }}
-                          onDrop={(event) => {
-                            if (!sourceId || listMode !== "today") return;
-                            event.preventDefault();
-                            void applyMove(sourceId, row.item.id, "chain");
+                          onDragEnd={() => {
+                            setDraggedItemId(null);
+                            setDragOverItemId(null);
                           }}
                           onClick={() => {
                             selectItem(row.item.id, { fromListNavigation: true });
@@ -1513,21 +1535,14 @@ export default function Home() {
                         </div>
                       ) : null}
 
-                      {canDrop && listMode === "today" ? (
-                        <div
-                          onDragOver={(event) => event.preventDefault()}
-                          onDrop={(event) => {
-                            if (!sourceId) return;
-                            event.preventDefault();
-                            void applyMove(sourceId, row.item.id, "after");
-                          }}
-                          className="mt-2 flex flex-wrap gap-2 pl-6 text-[11px] uppercase tracking-[0.14em] text-black/48"
-                        >
-                          <button type="button" onClick={() => void applyMove(sourceId!, row.item.id, "chain")} className="border border-dashed border-black px-2 py-1 hover:border-solid hover:bg-black hover:text-white">
-                            Drop under
-                          </button>
-                          <button type="button" onClick={() => void applyMove(sourceId!, row.item.id, "after")} className="border border-dashed border-black px-2 py-1 hover:border-solid hover:bg-black hover:text-white">
-                            Drop after
+                      {grabbedItemId && grabbedItemId !== row.item.id && !draggedItemId && listMode === "today" ? (
+                        <div className="mt-2 flex flex-wrap gap-2 pl-6 text-[11px] uppercase tracking-[0.14em] text-black/48">
+                          <button
+                            type="button"
+                            onClick={() => void applyMove(grabbedItemId, row.item.id)}
+                            className="border border-dashed border-black px-2 py-1 hover:border-solid hover:bg-black hover:text-white"
+                          >
+                            Drop after this
                           </button>
                         </div>
                       ) : null}
@@ -1628,7 +1643,7 @@ export default function Home() {
               {activeItemId
                 ? "Everything else is dimmed · Press Escape to exit."
                 : grabbedItemId
-                  ? "Drop under a task to create a chain, or drop after to reorder it."
+                  ? "Pick a task and drop after it · the moved task wakes one minute later."
                   : rescheduleItemId
                     ? "Type a new wake-up time · Enter saves · Escape cancels."
                     : editItemId
