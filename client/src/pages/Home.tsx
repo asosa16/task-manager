@@ -232,7 +232,7 @@ function HelpPanel({
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view, after Esc)</div>
         <div className="flex items-center justify-between gap-3"><span>pick up the task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after another task</span><span className="font-semibold">Enter</span></div>
-        <div className="text-[10px] leading-4 text-black/40">Dropping moves the task to one minute after the task above it. Drag a task with the mouse for the same effect.</div>
+        <div className="text-[10px] leading-4 text-black/40">Dropping slots the task directly below the one above it. Drag a task with the mouse for the same effect.</div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Panels</div>
         <div className="flex items-center justify-between gap-3"><span>toggle this help</span><span className="font-semibold">?</span></div>
@@ -1643,7 +1643,7 @@ export default function Home() {
               {activeItemId
                 ? "Everything else is dimmed · Press Escape to exit."
                 : grabbedItemId
-                  ? "Pick a task and drop after it · the moved task wakes one minute later."
+                  ? "Pick a task and drop after it · the moved task slots directly below."
                   : rescheduleItemId
                     ? "Type a new wake-up time · Enter saves · Escape cancels."
                     : editItemId

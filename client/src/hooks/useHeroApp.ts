@@ -879,10 +879,15 @@ export function useHeroApp() {
     [projects, user],
   );
 
-  // Drop reorder: the dragged task's wake-up time becomes one minute after the
-  // drop target's, which slides it directly below that task in the due-sorted
-  // list. It also adopts the target's chain parent so it lands as a sibling of
-  // the target rather than dangling inside an unrelated chain.
+  // Drop reorder: the dragged task is retimed so it slides directly below the
+  // drop target in the due-sorted list. The wake-up time becomes one minute
+  // after the target's — unless the task that currently follows the target is
+  // less than a minute away, in which case a full minute would overshoot it
+  // and the dragged task would land below that task instead of below the
+  // target. So when there isn't room for a full minute, the task is placed at
+  // the midpoint between the target and whatever follows it, which keeps it
+  // strictly between the two. It also adopts the target's chain parent so it
+  // lands as a sibling of the target rather than dangling in an unrelated chain.
   const moveItem = useCallback(
     async (itemId: string, targetId: string): Promise<MutationResult> => {
       const source = items.find((item) => item.id === itemId);
@@ -901,7 +906,23 @@ export function useHeroApp() {
         return { ok: false, message: "A task cannot be dropped inside its own chain." };
       }
 
-      const nextDueAt = new Date(new Date(target.dueAt).getTime() + 60_000).toISOString();
+      const targetTime = new Date(target.dueAt).getTime();
+      // The wake-up time of whatever currently sits directly below the target:
+      // the soonest task strictly later than it (the dragged task excluded).
+      const nextTime = items
+        .filter((item) => item.id !== itemId && new Date(item.dueAt).getTime() > targetTime)
+        .reduce<number | undefined>((soonest, item) => {
+          const time = new Date(item.dueAt).getTime();
+          return soonest === undefined || time < soonest ? time : soonest;
+        }, undefined);
+
+      const oneMinuteAfter = targetTime + 60_000;
+      const nextDueAtMs =
+        nextTime === undefined || oneMinuteAfter < nextTime
+          ? oneMinuteAfter
+          : targetTime + Math.floor((nextTime - targetTime) / 2);
+
+      const nextDueAt = new Date(nextDueAtMs).toISOString();
       const result = await updateItem(itemId, {
         dueAt: nextDueAt,
         brokenDownFromId: target.brokenDownFromId,
