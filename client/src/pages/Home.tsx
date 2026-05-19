@@ -1238,7 +1238,7 @@ export default function Home() {
               </div>
             ) : pendingDefaultCapture && captureInput.trim() ? (
               <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-amber-700">
-                Add again → “{captureInput.trim()}” · tomorrow 8am
+                Add again → “{captureInput.trim()}” · in 5 minutes
               </div>
             ) : null}
           </header>
