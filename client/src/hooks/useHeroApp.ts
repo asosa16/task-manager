@@ -485,6 +485,18 @@ export function useHeroApp() {
       );
   }, [items]);
 
+  // Done + starred + completed today, newest first. These linger in the Today
+  // view as "trophies" even though done tasks normally disappear — a vanity
+  // shelf of the starred wins you cleared today. Derived from the already-sorted
+  // doneItems, re-filtered against the user's local day so a task finished at
+  // 11pm doesn't bleed across the midnight boundary in another timezone.
+  const starredDoneTodayItems = useMemo(() => {
+    const dayKey = getLocalDayKey(new Date());
+    return doneItems.filter(
+      (item) => item.isStarred && item.completedAt && getLocalDayKey(item.completedAt) === dayKey,
+    );
+  }, [doneItems]);
+
   const selectedIndex = useMemo(
     () => Math.max(0, upcomingItems.findIndex((item) => item.id === selectedId)),
     [selectedId, upcomingItems],
@@ -1067,6 +1079,7 @@ export function useHeroApp() {
     selectedId,
     selectedIndex,
     selectedItem,
+    starredDoneTodayItems,
     statusMessage,
     streak,
     upcomingItems,

@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { Star } from "lucide-react";
+import { Star, Trophy } from "lucide-react";
 import {
   formatDueLabel,
   parseCaptureInput,
@@ -1622,6 +1622,33 @@ export default function Home() {
               </div>
             ) : null}
           </div>
+
+          {/* Trophy shelf: starred tasks finished today linger here as a vanity
+              reward, even though done tasks otherwise vanish from Today. Today
+              view only, read-only — no actions, these are won, not pending. */}
+          {listMode === "today" && hero.starredDoneTodayItems.length > 0 ? (
+            <section className="border-t border-[#c8941f]/30 bg-[#c8941f]/[0.04] px-3 py-4 sm:px-4">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#9a7016]">
+                <Trophy className="h-3.5 w-3.5" strokeWidth={1.8} />
+                <span>
+                  Today’s trophies · {hero.starredDoneTodayItems.length}
+                </span>
+              </div>
+              <ul className="mt-3 flex flex-col gap-2">
+                {hero.starredDoneTodayItems.map((item) => (
+                  <li key={item.id} className="flex items-center gap-3">
+                    <Star className="h-4 w-4 shrink-0" strokeWidth={1.6} fill={STAR_GOLD} color={STAR_GOLD} />
+                    <span className="min-w-0 flex-1 truncate text-[14px] leading-6 text-black/70">{item.title}</span>
+                    {item.completedAt ? (
+                      <span className="shrink-0 text-[11px] uppercase tracking-[0.14em] text-[#9a7016]/75">
+                        {dueLabelForList(item.completedAt)}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           <footer className={`hidden border-t border-black px-3 py-3 sm:block sm:px-4 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
             <div className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black">
