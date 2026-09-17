@@ -5,8 +5,10 @@ Design note for this file:
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
 - Every project is its own container, all visible at once. Each container has its own one-line
   composer (Enter saves; a missing wake-up time defaults to five minutes from now, no second
-  press). Tasks drag between containers: onto a row to slot below it in that project, onto the
-  container background to just change project. Keyboard navigation walks all containers in order.
+  press). A task's project is the container it sits in — there is no project dropdown anywhere;
+  moving between projects is drag and drop (onto a row to slot below it in that project, onto the
+  container background to just change project) or the keyboard grab. Navigation walks all
+  containers in order.
 */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -354,7 +356,6 @@ export default function Home() {
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [editProjectId, setEditProjectId] = useState("");
   const [rescheduleItemId, setRescheduleItemId] = useState<string | null>(null);
   const [rescheduleValue, setRescheduleValue] = useState("tomorrow 9am");
   const [grabbedItemId, setGrabbedItemId] = useState<string | null>(null);
@@ -483,7 +484,6 @@ export default function Home() {
     setRescheduleItemId(null);
     setEditItemId(item.id);
     setEditValue(item.title);
-    setEditProjectId(resolveProjectId(item.projectId));
     hero.setSelectedId(item.id);
   }
 
@@ -549,9 +549,9 @@ export default function Home() {
     const parsed = parseCaptureInput(trimmed);
     const titleChanged = (parsed ? parsed.title : trimmed) !== target.title;
     const dueChanged = parsed && parsed.dueAt !== target.dueAt;
-    const projectChanged = (editProjectId || fallbackProjectId) !== resolveProjectId(target.projectId);
-    if (!titleChanged && !dueChanged && !projectChanged) return;
-    const result = await hero.editCapture(itemId, trimmed, editProjectId || fallbackProjectId || undefined);
+    if (!titleChanged && !dueChanged) return;
+    // The task's project is its container; inline edit never changes it.
+    const result = await hero.editCapture(itemId, trimmed, resolveProjectId(target.projectId) || undefined);
     if (!result.ok) {
       toast.error(result.message);
       return;
@@ -637,12 +637,6 @@ export default function Home() {
       Object.fromEntries(hero.projects.map((project) => [project.id, { name: project.name, tone: project.tone }])),
     );
   }, [hero.projects]);
-
-  useEffect(() => {
-    if (editItemId && (!editProjectId || !hero.projects.some((project) => project.id === editProjectId))) {
-      setEditProjectId(fallbackProjectId);
-    }
-  }, [editItemId, editProjectId, fallbackProjectId, hero.projects]);
 
   // One Enter saves. With a parseable wake-up time the task uses it; without
   // one it wakes up in five minutes. No confirmation step, no second press.
@@ -866,7 +860,8 @@ export default function Home() {
   }
 
   async function submitRename(itemId: string) {
-    const result = await hero.editCapture(itemId, editValue, editProjectId || fallbackProjectId || undefined);
+    const target = hero.items.find((item) => item.id === itemId);
+    const result = await hero.editCapture(itemId, editValue, resolveProjectId(target?.projectId) || undefined);
     if (!result.ok) return toast.error(result.message);
     if (result.message !== "No changes.") {
       showActionToast(result.message);
@@ -1544,43 +1539,7 @@ export default function Home() {
                                   {editParsed ? (
                                     <span className="mt-1 block text-[11px] text-black/45">Will save as “{editParsed.title}” · {editPreview}</span>
                                   ) : null}
-                                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                    <select
-                                      value={editProjectId}
-                                      onChange={(event) => {
-                                        const nextProjectId = event.target.value;
-                                        setEditProjectId(nextProjectId);
-                                        void (async () => {
-                                          const title = editValue.trim() || row.item.title;
-                                          const result = await hero.editCapture(row.item.id, title, nextProjectId || fallbackProjectId || undefined);
-                                          if (!result.ok) {
-                                            toast.error(result.message);
-                                            return;
-                                          }
-                                          if (result.message !== "No changes.") {
-                                            showActionToast(result.message);
-                                          }
-                                        })();
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                          event.preventDefault();
-                                          void submitRename(row.item.id);
-                                        }
-                                        if (event.key === "Escape") {
-                                          event.preventDefault();
-                                          setEditValue(row.item.title);
-                                          exitInlineEdit();
-                                        }
-                                      }}
-                                      className="min-h-8 border border-black/25 bg-white px-2 text-[11px] uppercase tracking-[0.14em] text-black/70 outline-none"
-                                    >
-                                      {hero.projects.map((project) => (
-                                        <option key={project.id} value={project.id}>
-                                          {project.name}
-                                        </option>
-                                      ))}
-                                    </select>
+                                  <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:hidden">
                                     <button
                                       type="button"
                                       onClick={() => void submitRename(row.item.id)}
