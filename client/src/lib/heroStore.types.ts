@@ -135,6 +135,24 @@ export class SchemaMissingError extends Error {
   }
 }
 
+/**
+ * Thrown by the remote store for any PostgREST response it could not accept,
+ * carrying the HTTP status (and Postgres error code when present) so the
+ * synced store's outbox can tell "retry later" (5xx, 401, 429, network) apart
+ * from "this write can never succeed" (404 row gone, 409 duplicate, 4xx).
+ */
+export class PostgrestRequestError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "PostgrestRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export const legacyShortcutHints = [
   { key: "N", description: "Quick add" },
   { key: "J / K", description: "Move focus" },

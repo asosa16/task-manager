@@ -9,15 +9,17 @@ Design note for this file:
 - Timeouts cover the full exchange including body read (Chrome's HTTP/2 can
   half-die and deliver headers but never finish the body; the 10s timer stays
   armed through response.json()).
-- Zero-row PATCH / DELETE surfaces as `Error("Item not found.")` so the hook's
-  MutationResult stays the same whether the row was deleted on another device
-  or never existed.
+- Zero-row PATCH / DELETE surfaces as a 404 PostgrestRequestError("Item not
+  found.") so the hook's MutationResult stays the same whether the row was
+  deleted on another device or never existed, and the synced store's outbox
+  knows the write is permanently unfulfillable rather than worth retrying.
 - 42P01 (undefined_table) at loadSnapshot time throws SchemaMissingError so the
   bootstrap effect can detect "database tables are not ready yet" without
   swallowing other errors (RLS violations, network failures, etc.).
 */
 
 import {
+  PostgrestRequestError,
   SchemaMissingError,
   mapItemRow,
   mapProjectRow,
@@ -114,7 +116,7 @@ async function postgrestFetch<T>(
       }
       const message = errorMessageFrom(errorBody, response.status);
       console.warn("[hero][db]", options.method, options.path, response.status, message);
-      throw new Error(message);
+      throw new PostgrestRequestError(message, response.status, errorBody.code);
     }
 
     if (response.status === 204) return null;
@@ -180,7 +182,7 @@ export function createRemoteStore(
         body,
       });
       if (!rows || rows.length === 0) {
-        throw new Error("Project not found.");
+        throw new PostgrestRequestError("Project not found.", 404);
       }
       return mapProjectRow(rows[0]);
     },
@@ -207,7 +209,7 @@ export function createRemoteStore(
         body: toItemPatch(patch),
       });
       if (!rows || rows.length === 0) {
-        throw new Error("Item not found.");
+        throw new PostgrestRequestError("Item not found.", 404);
       }
       return mapItemRow(rows[0]);
     },
@@ -220,7 +222,7 @@ export function createRemoteStore(
         prefer: "return=representation",
       });
       if (!rows || rows.length === 0) {
-        throw new Error("Item not found.");
+        throw new PostgrestRequestError("Item not found.", 404);
       }
     },
   };

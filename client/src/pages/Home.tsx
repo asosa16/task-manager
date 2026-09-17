@@ -3,6 +3,10 @@ Design note for this file:
 - Re-center Hero on the original extension ritual: one line in, one calm list out.
 - Keep the surface sparse and monochrome; secondary actions should stay hidden until asked for.
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
+- Every project is its own container, all visible at once. Each container has its own one-line
+  composer (Enter saves; a missing wake-up time defaults to five minutes from now, no second
+  press). Tasks drag between containers: onto a row to slot below it in that project, onto the
+  container background to just change project. Keyboard navigation walks all containers in order.
 */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -18,9 +22,11 @@ import {
   useHeroApp,
   type HeroItem,
   type ProjectTone,
+  type SyncStatus,
 } from "@/hooks/useHeroApp";
 
 const STAR_GOLD = "#c8941f";
+const UNSORTED_COLUMN_ID = "";
 
 const heroLogo =
   "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
@@ -41,6 +47,13 @@ type DisplayRow = {
   item: HeroItem;
   depth: number;
   parentId?: string;
+};
+type Column = {
+  id: string;
+  name: string;
+  tone: ProjectTone;
+  rows: DisplayRow[];
+  isVirtual: boolean;
 };
 
 function isEditingField(target: EventTarget | null) {
@@ -115,8 +128,23 @@ function blurActiveElement() {
   }
 }
 
+function syncStatusLabel(status: SyncStatus) {
+  switch (status) {
+    case "pending":
+      return "saving…";
+    case "syncing":
+      return "syncing…";
+    case "offline":
+      return "offline · saved on this device";
+    case "error":
+      return "sync paused · database not ready";
+    default:
+      return "synced";
+  }
+}
+
 function ProjectDot({ tone }: { tone: ProjectTone }) {
-  return <span className="inline-block h-2.5 w-2.5 rounded-full border border-black/15" style={{ backgroundColor: toneColorMap[tone] }} />;
+  return <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-black/15" style={{ backgroundColor: toneColorMap[tone] }} />;
 }
 
 function HeaderClock() {
@@ -212,8 +240,9 @@ function HelpPanel({
       </div>
       <div className="mt-3 space-y-2 text-black/72">
         <div className="text-[10px] uppercase tracking-[0.16em] text-black/45">Capture</div>
-        <div className="flex items-center justify-between gap-3"><span>focus new task input</span><span className="font-semibold">T <span className="text-black/40">/ ⇧N</span></span></div>
+        <div className="flex items-center justify-between gap-3"><span>focus the new-task line</span><span className="font-semibold">T <span className="text-black/40">/ ⇧N</span></span></div>
         <div className="flex items-center justify-between gap-3"><span>save the new task</span><span className="font-semibold">Enter</span></div>
+        <div className="text-[10px] leading-4 text-black/40">Each project has its own line. No wake-up time? It wakes up in 5 minutes.</div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">List navigation</div>
         <div className="flex items-center justify-between gap-3"><span>edit &amp; move through tasks</span><span className="font-semibold">↑ / ↓</span></div>
@@ -229,10 +258,10 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>exit active task</span><span className="font-semibold">Esc</span></div>
         <div className="flex items-center justify-between gap-3"><span>undo last action (after Esc)</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
 
-        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder (Today view, after Esc)</div>
+        <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Reorder &amp; move (after Esc)</div>
         <div className="flex items-center justify-between gap-3"><span>pick up the task</span><span className="font-semibold">Space</span></div>
         <div className="flex items-center justify-between gap-3"><span>drop after another task</span><span className="font-semibold">Enter</span></div>
-        <div className="text-[10px] leading-4 text-black/40">Dropping slots the task directly below the one above it. Drag a task with the mouse for the same effect.</div>
+        <div className="text-[10px] leading-4 text-black/40">Dropping slots the task directly below the one above it, in that project. Drag with the mouse for the same effect, or drag onto a project's empty space to move it there without retiming.</div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Panels</div>
         <div className="flex items-center justify-between gap-3"><span>toggle this help</span><span className="font-semibold">?</span></div>
@@ -316,11 +345,10 @@ export default function Home() {
   const listMode: ListMode =
     location === "/all" ? "all" : location === "/tomorrow" ? "tomorrow" : "today";
 
-  const [captureInput, setCaptureInput] = useState("");
-  const [captureProjectId, setCaptureProjectId] = useState("");
-  const [captureFocused, setCaptureFocused] = useState(false);
-  const [pendingDefaultCapture, setPendingDefaultCapture] = useState(false);
-  const [captureSaving, setCaptureSaving] = useState(false);
+  // One composer per project container, keyed by project id ("" = Unsorted).
+  const [captureInputs, setCaptureInputs] = useState<Record<string, string>>({});
+  const [captureFocusedColumnId, setCaptureFocusedColumnId] = useState<string | null>(null);
+  const [captureSavingColumnId, setCaptureSavingColumnId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
@@ -333,11 +361,15 @@ export default function Home() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   // The row a dragged task is currently hovering over — highlighted as the
   // drop target. Dropping onto it sets the dragged task's wake-up time to one
-  // minute after this row's, sliding it directly below.
+  // minute after this row's, sliding it directly below (and into its project).
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
+  // The container the cursor is over. When no row is hovered, the container
+  // itself is the target: dropping moves the task into that project as-is.
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [leavingRow, setLeavingRow] = useState<{
     row: DisplayRow;
+    columnId: string;
     originalIndex: number;
     phase: "celebrate" | "dispatch";
     kind: "done" | "delete";
@@ -348,7 +380,7 @@ export default function Home() {
   >([]);
   // Keys of in-flight per-item mutations, e.g. "done:<uuid>". Buttons disable
   // while the key is present so the user can't double-submit a mark-done while
-  // the DB write is still pending, and markDone's confetti / row animation
+  // the store write is still pending, and markDone's confetti / row animation
   // only fire once the await resolves — no optimistic UI.
   const [pendingMutations, setPendingMutations] = useState<Set<string>>(() => new Set());
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
@@ -356,8 +388,7 @@ export default function Home() {
   const [projectDrafts, setProjectDrafts] = useState<Record<string, { name: string; tone: ProjectTone }>>({});
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectTone, setNewProjectTone] = useState<ProjectTone>("moss");
-  const captureInputRef = useRef<HTMLInputElement | null>(null);
-  const captureProjectRef = useRef<HTMLSelectElement | null>(null);
+  const captureInputRefs = useRef(new Map<string, HTMLInputElement | null>());
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const hasAutoFocusedCaptureRef = useRef(false);
   const doneButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
@@ -372,24 +403,57 @@ export default function Home() {
     return hero.upcomingItems;
   }, [hero.upcomingItems, listMode]);
 
-  const displayRows = useMemo(() => buildDisplayRows(filteredItems), [filteredItems]);
-  const renderRows = useMemo(() => {
-    if (!leavingRow) return displayRows;
-    if (displayRows.some((r) => r.item.id === leavingRow.row.item.id)) return displayRows;
-    const insertAt = Math.min(leavingRow.originalIndex, displayRows.length);
-    const merged = displayRows.slice();
-    merged.splice(insertAt, 0, leavingRow.row);
-    return merged;
-  }, [displayRows, leavingRow]);
-  const focusLockId = holdingDoneItemId ?? (leavingRow?.phase === "celebrate" ? leavingRow.row.item.id : null);
   const projectById = useMemo(() => new Map(hero.projects.map((project) => [project.id, project])), [hero.projects]);
   const fallbackProjectId = hero.defaultProjectId ?? hero.projects[0]?.id ?? "";
+
+  // One container per project, in project order. Items whose project is
+  // missing land in the default project (matching how the hook resolves them
+  // on save); if there is no project to fall back to, an "Unsorted" container
+  // appears so nothing is ever hidden.
+  const columns = useMemo<Column[]>(() => {
+    const byColumn = new Map<string, HeroItem[]>();
+    filteredItems.forEach((item) => {
+      const key = item.projectId && projectById.has(item.projectId) ? item.projectId : fallbackProjectId;
+      const bucket = byColumn.get(key) ?? [];
+      bucket.push(item);
+      byColumn.set(key, bucket);
+    });
+
+    const result: Column[] = hero.projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      tone: project.tone,
+      rows: buildDisplayRows(byColumn.get(project.id) ?? []),
+      isVirtual: false,
+    }));
+
+    const orphans = Array.from(byColumn.entries())
+      .filter(([key]) => !projectById.has(key))
+      .flatMap(([, bucket]) => bucket);
+    if (orphans.length || result.length === 0) {
+      result.push({
+        id: UNSORTED_COLUMN_ID,
+        name: "Unsorted",
+        tone: "ink",
+        rows: buildDisplayRows(orphans),
+        isVirtual: true,
+      });
+    }
+    return result;
+  }, [fallbackProjectId, filteredItems, hero.projects, projectById]);
+
+  const displayRows = useMemo(() => columns.flatMap((column) => column.rows), [columns]);
+  const columnIdByItemId = useMemo(() => {
+    const map = new Map<string, string>();
+    columns.forEach((column) => column.rows.forEach((row) => map.set(row.item.id, column.id)));
+    return map;
+  }, [columns]);
+  const focusLockId = holdingDoneItemId ?? (leavingRow?.phase === "celebrate" ? leavingRow.row.item.id : null);
   const selectedIndex = useMemo(() => displayRows.findIndex((row) => row.item.id === hero.selectedId), [displayRows, hero.selectedId]);
   const selectedRow = selectedIndex >= 0 ? displayRows[selectedIndex] : displayRows[0] ?? null;
-  const capturePreview = useMemo(() => previewCaptureInput(captureInput), [captureInput]);
-  const parsedCapture = useMemo(() => parseCaptureInput(captureInput), [captureInput]);
   const editParsed = useMemo(() => (editItemId ? parseCaptureInput(editValue) : null), [editItemId, editValue]);
   const editPreview = useMemo(() => (editItemId ? previewCaptureInput(editValue) : ""), [editItemId, editValue]);
+  const captureFocused = captureFocusedColumnId !== null;
   const isTyping = editItemId !== null || rescheduleItemId !== null || captureFocused;
 
   function showActionToast(message: string) {
@@ -397,7 +461,20 @@ export default function Home() {
   }
 
   function resolveProjectId(projectId?: string | null) {
-    return projectId ?? fallbackProjectId;
+    return projectId && projectById.has(projectId) ? projectId : fallbackProjectId;
+  }
+
+  function columnIdForItem(item: HeroItem) {
+    return columnIdByItemId.get(item.id) ?? resolveProjectId(item.projectId);
+  }
+
+  function rowsForColumn(column: Column) {
+    if (!leavingRow || leavingRow.columnId !== column.id) return column.rows;
+    if (column.rows.some((r) => r.item.id === leavingRow.row.item.id)) return column.rows;
+    const insertAt = Math.min(leavingRow.originalIndex, column.rows.length);
+    const merged = column.rows.slice();
+    merged.splice(insertAt, 0, leavingRow.row);
+    return merged;
   }
 
   function beginItemEdit(item: HeroItem, options?: { openMenu?: boolean }) {
@@ -411,7 +488,7 @@ export default function Home() {
   }
 
   function isComposerFocusTarget(target: EventTarget | null) {
-    return target === captureInputRef.current || target === captureProjectRef.current;
+    return Array.from(captureInputRefs.current.values()).some((input) => input !== null && input === target);
   }
 
   function releaseComposerFocus() {
@@ -420,16 +497,23 @@ export default function Home() {
     }
   }
 
-  function focusCaptureComposer() {
+  function focusCaptureComposer(columnId?: string) {
     setSelectionDismissed(false);
     setShowHelp(false);
     setMenuItemId(null);
     setGrabbedItemId(null);
     setDraggedItemId(null);
     setDragOverItemId(null);
+    setDragOverColumnId(null);
+    const preferred =
+      columnId ?? (selectedRow ? columnIdForItem(selectedRow.item) : fallbackProjectId);
     window.setTimeout(() => {
-      captureInputRef.current?.focus();
-      captureInputRef.current?.select();
+      const input =
+        captureInputRefs.current.get(preferred) ??
+        Array.from(captureInputRefs.current.values()).find((candidate) => Boolean(candidate)) ??
+        null;
+      input?.focus();
+      input?.select();
     }, 0);
   }
 
@@ -481,14 +565,19 @@ export default function Home() {
     blurActiveElement();
   }
 
+  function clearDragState() {
+    setGrabbedItemId(null);
+    setDraggedItemId(null);
+    setDragOverItemId(null);
+    setDragOverColumnId(null);
+  }
+
   function dismissFocusState() {
     setShowHelp(false);
     setMenuItemId(null);
     setEditItemId(null);
     setRescheduleItemId(null);
-    setGrabbedItemId(null);
-    setDraggedItemId(null);
-    setDragOverItemId(null);
+    clearDragState();
     setSelectionDismissed(true);
     hero.setSelectedId(null);
     blurActiveElement();
@@ -521,11 +610,15 @@ export default function Home() {
 
     hasAutoFocusedCaptureRef.current = true;
     const timer = window.setTimeout(() => {
-      captureInputRef.current?.focus();
-      captureInputRef.current?.select();
+      const input =
+        captureInputRefs.current.get(fallbackProjectId) ??
+        Array.from(captureInputRefs.current.values()).find((candidate) => Boolean(candidate)) ??
+        null;
+      input?.focus();
+      input?.select();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [hero.user]);
+  }, [fallbackProjectId, hero.user]);
 
   useEffect(() => {
     if (!editItemId) return undefined;
@@ -546,38 +639,26 @@ export default function Home() {
   }, [hero.projects]);
 
   useEffect(() => {
-    if (!captureProjectId || !hero.projects.some((project) => project.id === captureProjectId)) {
-      setCaptureProjectId(fallbackProjectId);
-    }
-  }, [captureProjectId, fallbackProjectId, hero.projects]);
-
-  useEffect(() => {
     if (editItemId && (!editProjectId || !hero.projects.some((project) => project.id === editProjectId))) {
       setEditProjectId(fallbackProjectId);
     }
   }, [editItemId, editProjectId, fallbackProjectId, hero.projects]);
 
-  async function submitCapture(event?: FormEvent<HTMLFormElement>) {
+  // One Enter saves. With a parseable wake-up time the task uses it; without
+  // one it wakes up in five minutes. No confirmation step, no second press.
+  async function submitCapture(columnId: string, event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (captureSaving) {
+    if (captureSavingColumnId === columnId) {
       toast("Still saving — hang on a sec.", { duration: 2000 });
       return;
     }
-    const trimmed = captureInput.trim();
+    const trimmed = (captureInputs[columnId] ?? "").trim();
     if (!trimmed) return;
 
     const parsed = parseCaptureInput(trimmed);
-    const projectId = captureProjectId || fallbackProjectId || undefined;
+    const projectId = columnId || fallbackProjectId || undefined;
 
-    if (!parsed && !pendingDefaultCapture) {
-      setPendingDefaultCapture(true);
-      toast("No wake-up time detected. Add again to use default (in 5 minutes).", {
-        duration: 6000,
-      });
-      return;
-    }
-
-    setCaptureSaving(true);
+    setCaptureSavingColumnId(columnId);
     try {
       const result = parsed
         ? await hero.saveDraft({
@@ -599,14 +680,12 @@ export default function Home() {
         return;
       }
       showActionToast(result.message);
-      setCaptureInput("");
-      setCaptureProjectId(fallbackProjectId);
+      setCaptureInputs((current) => ({ ...current, [columnId]: "" }));
       setSelectionDismissed(false);
-      setPendingDefaultCapture(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save task. Try again.");
     } finally {
-      setCaptureSaving(false);
+      setCaptureSavingColumnId((current) => (current === columnId ? null : current));
     }
   }
 
@@ -639,6 +718,58 @@ export default function Home() {
     }
   }
 
+  function locateRow(itemId: string) {
+    for (const column of columns) {
+      const index = column.rows.findIndex((r) => r.item.id === itemId);
+      if (index >= 0) return { column, index, row: column.rows[index] };
+    }
+    return null;
+  }
+
+  function playLeavingAnimation(
+    itemId: string,
+    located: { column: Column; index: number; row: DisplayRow } | null,
+    burstPosition: { x: number; y: number } | null,
+    kind: "done" | "delete",
+  ) {
+    if (!located || !burstPosition) return;
+    clearLeavingTimers();
+    const burst = {
+      id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      x: burstPosition.x,
+      y: burstPosition.y,
+      kind,
+    };
+    setConfettiBursts((prev) => [...prev, burst]);
+    window.setTimeout(() => {
+      setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
+    }, 800);
+    setLeavingRow({
+      row: located.row,
+      columnId: located.column.id,
+      originalIndex: located.index,
+      phase: "celebrate",
+      kind,
+    });
+    celebrateTimerRef.current = window.setTimeout(() => {
+      celebrateTimerRef.current = null;
+      setLeavingRow((prev) =>
+        prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev,
+      );
+      dispatchTimerRef.current = window.setTimeout(() => {
+        dispatchTimerRef.current = null;
+        setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
+      }, 350);
+    }, 450);
+  }
+
+  function burstPositionFor(button: HTMLButtonElement | null | undefined) {
+    const rect = button?.getBoundingClientRect();
+    return rect && (rect.width > 0 || rect.height > 0)
+      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      : null;
+  }
+
   async function markDone(itemId: string) {
     cancelHoldDone();
     if (editItemId === itemId) {
@@ -653,14 +784,8 @@ export default function Home() {
     // Once the mutation resolves and hero.items updates, the item leaves
     // the upcoming list and its button unmounts — the post-success
     // animation has to reference values frozen from the pre-mutation state.
-    const originalIndex = displayRows.findIndex((r) => r.item.id === itemId);
-    const row = originalIndex >= 0 ? displayRows[originalIndex] : null;
-    const btn = doneButtonRefs.current.get(itemId);
-    const rect = btn?.getBoundingClientRect();
-    const burstPosition =
-      rect && (rect.width > 0 || rect.height > 0)
-        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-        : null;
+    const located = locateRow(itemId);
+    const burstPosition = burstPositionFor(doneButtonRefs.current.get(itemId));
 
     setPendingMutations((prev) => {
       const next = new Set(prev);
@@ -674,31 +799,7 @@ export default function Home() {
         toast.error(result.message);
         return;
       }
-
-      if (row && burstPosition) {
-        clearLeavingTimers();
-        const burst = {
-          id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          x: burstPosition.x,
-          y: burstPosition.y,
-          kind: "done" as const,
-        };
-        setConfettiBursts((prev) => [...prev, burst]);
-        window.setTimeout(() => {
-          setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
-        }, 800);
-        setLeavingRow({ row, originalIndex, phase: "celebrate", kind: "done" });
-        celebrateTimerRef.current = window.setTimeout(() => {
-          celebrateTimerRef.current = null;
-          setLeavingRow((prev) =>
-            prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev,
-          );
-          dispatchTimerRef.current = window.setTimeout(() => {
-            dispatchTimerRef.current = null;
-            setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
-          }, 350);
-        }, 450);
-      }
+      playLeavingAnimation(itemId, located, burstPosition, "done");
       showActionToast(result.message);
     } finally {
       setPendingMutations((prev) => {
@@ -718,18 +819,8 @@ export default function Home() {
     const key = `delete:${itemId}`;
     if (pendingMutations.has(key)) return;
 
-    // Same pre-mutation snapshot pattern as markDone: capture row + button rect
-    // before awaiting, because once the store resolves the row unmounts and the
-    // delete button's bounding rect is gone — the post-success animation
-    // references frozen pre-mutation values.
-    const originalIndex = displayRows.findIndex((r) => r.item.id === itemId);
-    const row = originalIndex >= 0 ? displayRows[originalIndex] : null;
-    const btn = deleteButtonRefs.current.get(itemId);
-    const rect = btn?.getBoundingClientRect();
-    const burstPosition =
-      rect && (rect.width > 0 || rect.height > 0)
-        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-        : null;
+    const located = locateRow(itemId);
+    const burstPosition = burstPositionFor(deleteButtonRefs.current.get(itemId));
 
     setPendingMutations((prev) => {
       const next = new Set(prev);
@@ -743,31 +834,7 @@ export default function Home() {
         toast.error(result.message);
         return;
       }
-
-      if (row && burstPosition) {
-        clearLeavingTimers();
-        const burst = {
-          id: `${itemId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          x: burstPosition.x,
-          y: burstPosition.y,
-          kind: "delete" as const,
-        };
-        setConfettiBursts((prev) => [...prev, burst]);
-        window.setTimeout(() => {
-          setConfettiBursts((prev) => prev.filter((b) => b.id !== burst.id));
-        }, 800);
-        setLeavingRow({ row, originalIndex, phase: "celebrate", kind: "delete" });
-        celebrateTimerRef.current = window.setTimeout(() => {
-          celebrateTimerRef.current = null;
-          setLeavingRow((prev) =>
-            prev && prev.row.item.id === itemId ? { ...prev, phase: "dispatch" } : prev,
-          );
-          dispatchTimerRef.current = window.setTimeout(() => {
-            dispatchTimerRef.current = null;
-            setLeavingRow((prev) => (prev && prev.row.item.id === itemId ? null : prev));
-          }, 350);
-        }, 450);
-      }
+      playLeavingAnimation(itemId, located, burstPosition, "delete");
       showActionToast(result.message);
     } finally {
       setPendingMutations((prev) => {
@@ -788,9 +855,14 @@ export default function Home() {
     const result = await hero.moveItem(itemId, targetId);
     if (!result.ok) return toast.error(result.message);
     showActionToast(result.message);
-    setGrabbedItemId(null);
-    setDraggedItemId(null);
-    setDragOverItemId(null);
+    clearDragState();
+  }
+
+  async function applyMoveToColumn(itemId: string, columnId: string) {
+    const result = await hero.moveItemToProject(itemId, columnId || undefined);
+    clearDragState();
+    if (!result.ok) return toast.error(result.message);
+    if (result.message !== "No changes.") showActionToast(result.message);
   }
 
   async function submitRename(itemId: string) {
@@ -824,7 +896,6 @@ export default function Home() {
   async function setDefaultProject(projectId: string) {
     const result = await hero.setDefaultProject(projectId);
     if (!result.ok) return toast.error(result.message);
-    setCaptureProjectId(projectId);
     toast.success(result.message);
   }
 
@@ -934,7 +1005,7 @@ export default function Home() {
         return;
       }
 
-      if ((event.key === " " || event.code === "Space") && listMode === "today") {
+      if (event.key === " " || event.code === "Space") {
         event.preventDefault();
         setGrabbedItemId((current) => (current === selectedRow.item.id ? null : selectedRow.item.id));
         setMenuItemId(null);
@@ -943,7 +1014,7 @@ export default function Home() {
       }
 
       if (event.key === "Enter") {
-        if (grabbedItemId && grabbedItemId !== selectedRow.item.id && listMode === "today") {
+        if (grabbedItemId && grabbedItemId !== selectedRow.item.id) {
           event.preventDefault();
           void applyMove(grabbedItemId, selectedRow.item.id);
           return;
@@ -961,7 +1032,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayRows, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow, editItemId, rescheduleItemId, activeItemId, hoveredItemId]);
+  }, [displayRows, columns, grabbedItemId, hero, listMode, location, navigate, selectedIndex, selectedRow, editItemId, rescheduleItemId, activeItemId, hoveredItemId]);
 
   useEffect(() => {
     function onKeyUp(event: KeyboardEvent) {
@@ -1010,22 +1081,30 @@ export default function Home() {
     return <AuthShell onSignIn={hero.signInWithPassword} onSignUp={hero.signUpWithPassword} />;
   }
 
+  const sourceId = draggedItemId || grabbedItemId;
+
+  const emptyColumnText =
+    listMode === "today"
+      ? "Nothing due today."
+      : listMode === "tomorrow"
+        ? "Nothing due tomorrow."
+        : "No upcoming tasks.";
+
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-3 py-3 text-black sm:px-4">
       {activeItemId ? <div className="hero-tunnel-backdrop" aria-hidden="true" /> : null}
-<div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-[1400px]">
         <section className="border border-black bg-white shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
           <header className={`border-b border-black px-3 py-3 sm:px-4 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
-              <div className="relative flex flex-wrap items-center justify-between gap-3">
-	              <div className="flex items-center gap-4 text-sm font-semibold">
-	                <div className="flex items-center gap-3">
-	                  <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
-	                  <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
-	                </div>
-	                <span className="hidden h-6 w-px bg-black/15 sm:inline-block" aria-hidden="true" />
-	                <HeaderClock />
-	              </div>
-
+            <div className="relative flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-4 text-sm font-semibold">
+                <div className="flex items-center gap-3">
+                  <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
+                  <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+                </div>
+                <span className="hidden h-6 w-px bg-black/15 sm:inline-block" aria-hidden="true" />
+                <HeaderClock />
+              </div>
 
               <nav className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] uppercase tracking-[0.14em] text-black/58 sm:text-xs sm:tracking-[0.16em]">
                 <button
@@ -1073,11 +1152,11 @@ export default function Home() {
               </nav>
 
               {showProjects ? (
-                <div className="mt-4 border border-black/12 bg-[#f7f6f1] p-3 text-sm">
+                <div className="mt-4 w-full border border-black/12 bg-[#f7f6f1] p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 pb-2">
                     <div>
                       <div className="text-[11px] uppercase tracking-[0.16em] text-black/55">Projects</div>
-                      <div className="mt-1 text-black/72">Set a default project and keep every task tied to a color-coded lane.</div>
+                      <div className="mt-1 text-black/72">Each project is its own container below. The default project is where T lands and where unfiled tasks go.</div>
                     </div>
                     <button type="button" onClick={() => setShowProjects(false)} className="text-xs uppercase tracking-[0.14em] text-black/58 hover:text-black">
                       close
@@ -1142,485 +1221,538 @@ export default function Home() {
               {showHelp ? <HelpPanel onClose={() => setShowHelp(false)} onSignOut={() => void hero.signOut()} /> : null}
             </div>
 
-            <form onSubmit={submitCapture} className="mt-4 flex flex-col gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_180px_auto]">
-              <input
-                ref={captureInputRef}
-                value={captureInput}
-                onFocus={() => setCaptureFocused(true)}
-                onBlur={() => setCaptureFocused(false)}
-                onChange={(event) => {
-                  setCaptureInput(event.target.value);
-                  if (pendingDefaultCapture) setPendingDefaultCapture(false);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void submitCapture();
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    dismissFocusState();
-                    return;
-                  }
-                  if (event.key === "Tab") {
-                    event.preventDefault();
-                    cyclePrimaryRoute(event.shiftKey ? -1 : 1);
-                    return;
-                  }
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    if (displayRows.length) {
-                      const target = selectedRow?.item ?? displayRows[0].item;
-                      selectItem(target.id, { fromListNavigation: true });
-                      beginItemEdit(target);
-                    }
-                    return;
-                  }
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault();
-                    if (displayRows.length) {
-                      const target = selectedRow?.item ?? displayRows[displayRows.length - 1].item;
-                      selectItem(target.id, { fromListNavigation: true });
-                      beginItemEdit(target);
-                    }
-                    return;
-                  }
-                  if (event.key === "?" && captureInput.trim() === "") {
-                    event.preventDefault();
-                    setShowHelp((current) => !current);
-                  }
-                }}
-                placeholder="follow up with Katherine tomorrow 9am"
-                className="min-h-11 w-full border border-black bg-white px-3 text-[15px] outline-none"
-              />
-              <div className="flex gap-2 sm:contents">
-                <select
-                  ref={captureProjectRef}
-                  value={captureProjectId}
-                  onChange={(event) => setCaptureProjectId(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void submitCapture();
-                    }
-                  }}
-                  className="min-h-11 min-w-0 flex-1 border border-black bg-white px-3 text-sm outline-none sm:flex-auto"
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-black/68">
+              <span>{hero.doneTodayCount} done today</span>
+              <span>{hero.overdueCount} overdue</span>
+              <span>{hero.streak} day streak</span>
+              {hero.remoteReady ? (
+                <span
+                  className={`ml-auto text-[11px] uppercase tracking-[0.14em] ${
+                    hero.syncStatus === "offline" || hero.syncStatus === "error" ? "text-amber-700" : "text-black/40"
+                  }`}
+                  title={hero.statusMessage}
                 >
-                  {hero.projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="inline-flex min-h-11 shrink-0 items-center justify-center border border-black bg-black px-4 text-xs font-semibold uppercase tracking-[0.16em] text-white"
-                >
-                  Add
-                </button>
-              </div>
-            </form>
-
-            <div className="mt-2 flex flex-col gap-1 text-xs text-black/68 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                {captureInput.trim()
-                  ? pendingDefaultCapture
-                    ? "No wake-up time detected. Add again to save with a wake-up time 5 minutes from now."
-                    : capturePreview || "Type the task together with a wake-up time, like “call Daniel tomorrow 8am” — or add twice to wake up in 5 minutes."
-                  : "One line only: task name plus wake-up time."}
-              </div>
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                <span>{hero.doneTodayCount} done today</span>
-                <span>{hero.overdueCount} overdue</span>
-                <span>{hero.streak} day streak</span>
-              </div>
+                  {syncStatusLabel(hero.syncStatus)}
+                </span>
+              ) : null}
             </div>
-
-            {parsedCapture ? (
-              <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-black/52">
-                {captureSaving ? "Saving" : "Will save"} as “{parsedCapture.title}”
-              </div>
-            ) : pendingDefaultCapture && captureInput.trim() ? (
-              <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-amber-700">
-                Add again → “{captureInput.trim()}” · in 5 minutes
-              </div>
-            ) : null}
           </header>
 
-          <div className="divide-y divide-black/10">
-            {renderRows.map((row) => {
-              const isSelected = hero.selectedId === row.item.id && !captureFocused;
-              const isEditingRow = editItemId === row.item.id;
-              const isCelebratingRow = leavingRow?.phase === "celebrate" && leavingRow.row.item.id === row.item.id;
-              const isDispatchingRow = leavingRow?.phase === "dispatch" && leavingRow.row.item.id === row.item.id;
-              const isLeavingRow = isCelebratingRow || isDispatchingRow;
-              const leavingKind = isLeavingRow ? leavingRow!.kind : null;
-              const isHoldingDoneRow = holdingDoneItemId === row.item.id;
-              const isActiveRow = activeItemId === row.item.id;
-              const isDimmed = Boolean(activeItemId) && !isActiveRow;
-              const isBystander = focusLockId !== null && focusLockId !== row.item.id;
-              const isPastDue = new Date(row.item.dueAt).getTime() < Date.now();
-              const project = projectById.get(resolveProjectId(row.item.projectId));
-              const projectName = project?.name ?? null;
-              const projectTone = project?.tone ?? "ink";
-              const canDrop = Boolean((draggedItemId || grabbedItemId) && row.item.id !== draggedItemId && row.item.id !== grabbedItemId);
-              const sourceId = draggedItemId || grabbedItemId;
-              const isBeingDragged = draggedItemId === row.item.id;
-              const isDropTarget = canDrop && dragOverItemId === row.item.id && listMode === "today";
-              const actionsDimmed = isTyping && !isEditingRow;
-              const rowClass = [
-                isSelected ? "bg-black/[0.035]" : "bg-white",
-                isCelebratingRow ? (leavingKind === "delete" ? "hero-row-deleting-celebrate" : "hero-row-celebrating") : "",
-                isDispatchingRow ? (leavingKind === "delete" ? "hero-row-deleting-dispatching" : "hero-row-dispatching") : "",
-                isHoldingDoneRow ? "hero-row-holding-done" : "",
-                isActiveRow ? "hero-tunnel-active" : "",
-                isDimmed ? "hero-tunnel-dim" : "",
-                isBystander ? "hero-row-bystander" : "",
-                isBeingDragged ? "hero-row-dragging" : "",
-                isDropTarget ? "hero-row-drop-target" : "",
-              ].filter(Boolean).join(" ");
+          {/* Project containers: one per project, all visible, each with its own
+              composer. Auto-fit keeps them side by side when there is room and
+              stacks them on narrow screens. The 1px gap on a dark background
+              draws the dividers regardless of how the grid wraps. */}
+          <div className="grid gap-px bg-black/20 md:grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
+            {columns.map((column) => {
+              const rows = rowsForColumn(column);
+              const captureValue = captureInputs[column.id] ?? "";
+              const parsedCapture = captureValue.trim() ? parseCaptureInput(captureValue) : null;
+              const capturePreview = parsedCapture ? previewCaptureInput(captureValue) : "";
+              const isCaptureFocused = captureFocusedColumnId === column.id;
+              const isCaptureSaving = captureSavingColumnId === column.id;
+              const isColumnDropTarget =
+                Boolean(sourceId) && dragOverColumnId === column.id && dragOverItemId === null;
+              const columnClass = [
+                "flex min-h-[260px] flex-col bg-white",
+                isColumnDropTarget ? "hero-column-drop-target" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
 
               return (
-                <article
-                  key={row.item.id}
-                  className={rowClass}
-                  onMouseEnter={() => setHoveredItemId(row.item.id)}
-                  onMouseLeave={() => setHoveredItemId((current) => (current === row.item.id ? null : current))}
+                <section
+                  key={column.id || "unsorted"}
+                  className={columnClass}
+                  aria-label={`${column.name} tasks`}
                   onDragOver={(event) => {
-                    if (!canDrop || listMode !== "today") return;
+                    if (!sourceId) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
-                    // Each row claims the highlight as the cursor enters it;
-                    // dragEnd / drop clears it. No onDragLeave — clearing on
-                    // every child boundary crossing makes the marker flicker.
-                    if (dragOverItemId !== row.item.id) setDragOverItemId(row.item.id);
+                    // Reached only when the cursor is not over a row (rows stop
+                    // propagation), so the container itself is the target.
+                    if (dragOverItemId !== null) setDragOverItemId(null);
+                    if (dragOverColumnId !== column.id) setDragOverColumnId(column.id);
                   }}
                   onDrop={(event) => {
-                    if (!sourceId || !canDrop || listMode !== "today") return;
+                    if (!sourceId) return;
                     event.preventDefault();
-                    void applyMove(sourceId, row.item.id);
+                    void applyMoveToColumn(sourceId, column.id);
                   }}
                 >
-                  <div className="flex flex-col gap-2 px-3 py-3 sm:grid sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-start sm:gap-3 sm:px-4">
-                      <button
-                        type="button"
-                        onMouseEnter={() => {
-                          if (!editItemId && !rescheduleItemId) {
-                            selectItem(row.item.id, { fromListNavigation: true });
+                  <div className={`border-b border-black/10 px-3 pb-2 pt-3 ${activeItemId ? "hero-tunnel-dim" : ""}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-black">
+                        <ProjectDot tone={column.tone} />
+                        <span className="truncate">{column.name}</span>
+                        {hero.defaultProjectId === column.id ? (
+                          <span className="text-[9px] font-medium tracking-[0.14em] text-black/40">default</span>
+                        ) : null}
+                      </div>
+                      <span className="text-[10px] uppercase tracking-[0.16em] text-black/40">
+                        {column.rows.length}
+                      </span>
+                    </div>
+
+                    <form onSubmit={(event) => void submitCapture(column.id, event)} className="mt-2 flex gap-2">
+                      <input
+                        ref={(el) => {
+                          if (el) captureInputRefs.current.set(column.id, el);
+                          else captureInputRefs.current.delete(column.id);
+                        }}
+                        value={captureValue}
+                        onFocus={() => setCaptureFocusedColumnId(column.id)}
+                        onBlur={() => setCaptureFocusedColumnId((current) => (current === column.id ? null : current))}
+                        onChange={(event) =>
+                          setCaptureInputs((current) => ({ ...current, [column.id]: event.target.value }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void submitCapture(column.id);
+                            return;
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            dismissFocusState();
+                            return;
+                          }
+                          if (event.key === "Tab") {
+                            event.preventDefault();
+                            cyclePrimaryRoute(event.shiftKey ? -1 : 1);
+                            return;
+                          }
+                          if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            const target = column.rows[0]?.item ?? selectedRow?.item ?? displayRows[0]?.item;
+                            if (target) {
+                              selectItem(target.id, { fromListNavigation: true });
+                              beginItemEdit(target);
+                            }
+                            return;
+                          }
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            const target =
+                              column.rows[column.rows.length - 1]?.item ??
+                              selectedRow?.item ??
+                              displayRows[displayRows.length - 1]?.item;
+                            if (target) {
+                              selectItem(target.id, { fromListNavigation: true });
+                              beginItemEdit(target);
+                            }
+                            return;
+                          }
+                          if (event.key === "?" && captureValue.trim() === "") {
+                            event.preventDefault();
+                            setShowHelp((current) => !current);
                           }
                         }}
-                        onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
-                        className={`hidden text-left text-[11px] leading-5 sm:block sm:pt-1 sm:text-xs ${isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
+                        placeholder={column.isVirtual ? "add a task" : `add to ${column.name} · optional time, e.g. tomorrow 9am`}
+                        className="min-h-10 min-w-0 flex-1 border border-black bg-white px-3 text-[14px] outline-none"
+                        aria-label={`New task in ${column.name}`}
+                      />
+                      <button
+                        type="submit"
+                        className="inline-flex min-h-10 shrink-0 items-center justify-center border border-black bg-black px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-white"
                       >
-                      {dueLabelForList(row.item.dueAt)}
-                    </button>
-
-                    <div className="min-w-0">
-                      <div className={`flex items-center justify-between gap-2 sm:hidden ${isPastDue ? "text-red-800" : "text-black/55"}`}>
-                        <span className={`text-[11px] ${isPastDue ? "font-semibold" : ""}`}>{dueLabelForList(row.item.dueAt)}</span>
+                        Add
+                      </button>
+                    </form>
+                    {captureValue.trim() && (isCaptureFocused || isCaptureSaving) ? (
+                      <div className="mt-1.5 text-[11px] text-black/55">
+                        {parsedCapture ? (
+                          <>
+                            {isCaptureSaving ? "Saving" : "Will save"} as “{parsedCapture.title}” · {capturePreview}
+                          </>
+                        ) : (
+                          <>Enter saves “{captureValue.trim()}” · wakes up in 5 minutes</>
+                        )}
                       </div>
-                      {isEditingRow ? (
-                        <div className="mt-1 flex w-full items-start gap-3 sm:mt-0">
-                          <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
-                            {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
-                            <ProjectDot tone={projectTone} />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <input
-                              ref={editInputRef}
-                              value={editValue}
-                              onChange={(event) => setEditValue(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  void submitRename(row.item.id);
-                                  return;
-                                }
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  setEditValue(row.item.title);
-                                  exitInlineEdit();
-                                  return;
-                                }
-                                if (event.key === "Tab") {
-                                  event.preventDefault();
-                                  cyclePrimaryRoute(event.shiftKey ? -1 : 1);
-                                  return;
-                                }
-                                if (event.key === "ArrowDown") {
-                                  event.preventDefault();
-                                  void commitInlineEditIfNeeded().then(() => moveSelection(1, { enterEdit: true }));
-                                  return;
-                                }
-                                if (event.key === "ArrowUp") {
-                                  event.preventDefault();
-                                  void commitInlineEditIfNeeded().then(() => moveSelection(-1, { enterEdit: true }));
-                                  return;
-                                }
-                              }}
-                              className="block w-full border-0 bg-transparent p-0 text-[15px] leading-6 text-black outline-none"
-                            />
-                            {editParsed ? (
-                              <span className="mt-1 block text-[11px] text-black/45">Will save as “{editParsed.title}” · {editPreview}</span>
-                            ) : null}
-                          </div>
-                          <select
-                            value={editProjectId}
-                            onChange={(event) => {
-                              const nextProjectId = event.target.value;
-                              setEditProjectId(nextProjectId);
-                              void (async () => {
-                                const title = editValue.trim() || row.item.title;
-                                const result = await hero.editCapture(row.item.id, title, nextProjectId || fallbackProjectId || undefined);
-                                if (!result.ok) {
-                                  toast.error(result.message);
-                                  return;
-                                }
-                                if (result.message !== "No changes.") {
-                                  showActionToast(result.message);
-                                }
-                              })();
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void submitRename(row.item.id);
-                              }
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                setEditValue(row.item.title);
-                                exitInlineEdit();
-                              }
-                            }}
-                            className="min-h-8 shrink-0 border border-black/25 bg-white px-2 text-[11px] uppercase tracking-[0.14em] text-black/70 outline-none"
-                          >
-                            {hero.projects.map((project) => (
-                              <option key={project.id} value={project.id}>
-                                {project.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => void submitRename(row.item.id)}
-                            className="min-h-8 shrink-0 border border-black bg-black px-3 text-[11px] uppercase tracking-[0.14em] text-white outline-none sm:hidden"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          draggable={listMode === "today"}
-                          onMouseEnter={() => {
-                            if (!editItemId && !rescheduleItemId) {
-                              selectItem(row.item.id, { fromListNavigation: true });
-                            }
+                    ) : null}
+                  </div>
+
+                  <div className="flex-1 divide-y divide-black/10">
+                    {rows.map((row) => {
+                      const isSelected = hero.selectedId === row.item.id && !captureFocused;
+                      const isEditingRow = editItemId === row.item.id;
+                      const isCelebratingRow = leavingRow?.phase === "celebrate" && leavingRow.row.item.id === row.item.id;
+                      const isDispatchingRow = leavingRow?.phase === "dispatch" && leavingRow.row.item.id === row.item.id;
+                      const isLeavingRow = isCelebratingRow || isDispatchingRow;
+                      const leavingKind = isLeavingRow ? leavingRow!.kind : null;
+                      const isHoldingDoneRow = holdingDoneItemId === row.item.id;
+                      const isActiveRow = activeItemId === row.item.id;
+                      const isDimmed = Boolean(activeItemId) && !isActiveRow;
+                      const isBystander = focusLockId !== null && focusLockId !== row.item.id;
+                      const isPastDue = new Date(row.item.dueAt).getTime() < Date.now();
+                      const canDrop = Boolean(sourceId) && row.item.id !== sourceId;
+                      const isBeingDragged = draggedItemId === row.item.id;
+                      const isGrabbed = grabbedItemId === row.item.id;
+                      const isDropTarget = canDrop && dragOverItemId === row.item.id;
+                      const actionsDimmed = isTyping && !isEditingRow;
+                      const rowClass = [
+                        isSelected ? "bg-black/[0.035]" : "bg-white",
+                        isCelebratingRow ? (leavingKind === "delete" ? "hero-row-deleting-celebrate" : "hero-row-celebrating") : "",
+                        isDispatchingRow ? (leavingKind === "delete" ? "hero-row-deleting-dispatching" : "hero-row-dispatching") : "",
+                        isHoldingDoneRow ? "hero-row-holding-done" : "",
+                        isActiveRow ? "hero-tunnel-active" : "",
+                        isDimmed ? "hero-tunnel-dim" : "",
+                        isBystander ? "hero-row-bystander" : "",
+                        isBeingDragged || isGrabbed ? "hero-row-dragging" : "",
+                        isDropTarget ? "hero-row-drop-target" : "",
+                      ].filter(Boolean).join(" ");
+
+                      return (
+                        <article
+                          key={row.item.id}
+                          className={rowClass}
+                          onMouseEnter={() => setHoveredItemId(row.item.id)}
+                          onMouseLeave={() => setHoveredItemId((current) => (current === row.item.id ? null : current))}
+                          onDragOver={(event) => {
+                            if (!canDrop) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            event.dataTransfer.dropEffect = "move";
+                            // Each row claims the highlight as the cursor enters it;
+                            // dragEnd / drop clears it. No onDragLeave — clearing on
+                            // every child boundary crossing makes the marker flicker.
+                            if (dragOverItemId !== row.item.id) setDragOverItemId(row.item.id);
+                            if (dragOverColumnId !== column.id) setDragOverColumnId(column.id);
                           }}
-                          onDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            setMenuItemId(null);
-                            setGrabbedItemId(null);
-                            setDraggedItemId(row.item.id);
+                          onDrop={(event) => {
+                            if (!sourceId || !canDrop) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void applyMove(sourceId, row.item.id);
                           }}
-                          onDragEnd={() => {
-                            setDraggedItemId(null);
-                            setDragOverItemId(null);
-                          }}
-                          onClick={() => {
-                            selectItem(row.item.id, { fromListNavigation: true });
-                            if (window.matchMedia("(max-width: 639px)").matches) {
-                              void commitInlineEditIfNeeded();
-                              flushSync(() => beginItemEdit(row.item));
-                              const input = editInputRef.current;
-                              if (input) {
-                                input.focus();
-                                const end = input.value.length;
-                                input.setSelectionRange(end, end);
-                              }
-                            }
-                          }}
-                          onDoubleClick={() => beginItemEdit(row.item)}
-                          className="mt-1 flex w-full items-start gap-3 text-left sm:mt-0"
                         >
-                          <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
-                            {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
-                            <ProjectDot tone={projectTone} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="hero-title-text block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
-                          </span>
-                          {isLeavingRow ? (
-                            <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
-                              {leavingKind === "delete" ? (
-                                <>
-                                  <span className="hero-delete-burst absolute inset-0 rounded-full" />
-                                  <span className="hero-delete-x-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full text-white text-sm font-bold shadow-[0_6px_18px_rgba(220,38,38,0.35)]">
-                                    ✕
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="hero-done-burst absolute inset-0 rounded-full bg-emerald-400/60" />
-                                  <span className="hero-done-check-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-bold shadow-[0_6px_18px_rgba(5,150,105,0.35)]">
-                                    ✓
-                                  </span>
-                                </>
-                              )}
-                            </span>
-                          ) : null}
-                        </button>
-                      )}
-
-                      {menuItemId === row.item.id ? (
-                        <div className="mt-2 border-l border-black/15 pl-6 text-xs text-black/72">
-                          {rescheduleItemId === row.item.id ? (
-                            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                              <input
-                                autoFocus
-                                value={rescheduleValue}
-                                onChange={(event) => setRescheduleValue(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    void submitReschedule(row.item.id);
-                                  }
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    setRescheduleItemId(null);
-                                    blurActiveElement();
-                                  }
-                                }}
-                                className="min-h-10 flex-1 border border-black px-3 text-sm outline-none"
-                              />
-                              <button type="button" onClick={() => void submitReschedule(row.item.id)} className="min-h-10 border border-black px-3">
-                                Save
-                              </button>
-                            </div>
-                          ) : null}
-
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => beginItemEdit(row.item)}
-                              className="border border-black px-2 py-1"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRescheduleItemId(row.item.id);
-                                setRescheduleValue("tomorrow 9am");
-                                setEditItemId(null);
-                              }}
-                              className="border border-black px-2 py-1"
-                            >
-                              Reschedule
-                            </button>
-                            {listMode === "today" ? (
+                          <div className="px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-2">
                               <button
                                 type="button"
-                                onClick={() => setGrabbedItemId((current) => (current === row.item.id ? null : row.item.id))}
-                                className="border border-black px-2 py-1"
+                                onMouseEnter={() => {
+                                  if (!editItemId && !rescheduleItemId) {
+                                    selectItem(row.item.id, { fromListNavigation: true });
+                                  }
+                                }}
+                                onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
+                                className={`min-w-0 truncate text-left text-[11px] leading-5 ${isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
                               >
-                                {grabbedItemId === row.item.id ? "Cancel move" : "Move"}
+                                {dueLabelForList(row.item.dueAt)}
                               </button>
+
+                              <div className={`flex shrink-0 items-center justify-end gap-1 transition-opacity ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
+                                <button
+                                  type="button"
+                                  disabled={actionsDimmed}
+                                  onClick={() => void toggleStar(row.item.id)}
+                                  aria-pressed={Boolean(row.item.isStarred)}
+                                  className={`inline-flex h-8 w-8 items-center justify-center border transition disabled:cursor-not-allowed ${
+                                    row.item.isStarred
+                                      ? "border-[#c8941f]/55 hover:border-[#c8941f]"
+                                      : "border-black/18 text-black/35 hover:border-black hover:text-black"
+                                  }`}
+                                  aria-label={row.item.isStarred ? "Unstar task" : "Star task"}
+                                  title={row.item.isStarred ? "Unstar (⇧⌘1)" : "Star (⇧⌘1)"}
+                                >
+                                  <Star
+                                    className="h-4 w-4"
+                                    strokeWidth={1.6}
+                                    fill={row.item.isStarred ? STAR_GOLD : "none"}
+                                    color={row.item.isStarred ? STAR_GOLD : "currentColor"}
+                                  />
+                                </button>
+                                <button
+                                  type="button"
+                                  ref={(el) => {
+                                    if (el) doneButtonRefs.current.set(row.item.id, el);
+                                    else doneButtonRefs.current.delete(row.item.id);
+                                  }}
+                                  disabled={actionsDimmed || isLeavingRow}
+                                  onClick={() => void markDone(row.item.id)}
+                                  className="inline-flex h-8 w-8 items-center justify-center border border-black/22 text-[12px] font-semibold text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed"
+                                  aria-label="Mark task as done"
+                                  title="Mark task as done (⇧⌘D)"
+                                >
+                                  <span aria-hidden="true">✓</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  ref={(el) => {
+                                    if (el) deleteButtonRefs.current.set(row.item.id, el);
+                                    else deleteButtonRefs.current.delete(row.item.id);
+                                  }}
+                                  disabled={actionsDimmed || isLeavingRow}
+                                  onClick={() => void removeItem(row.item.id)}
+                                  className="inline-flex h-8 w-8 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed"
+                                  aria-label="Delete task"
+                                  title="Delete (⇧⌘⌫)"
+                                >
+                                  🗑
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={actionsDimmed}
+                                  onClick={() => setMenuItemId((current) => (current === row.item.id ? null : row.item.id))}
+                                  className="hidden h-8 w-8 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed sm:inline-flex"
+                                  aria-label="More actions"
+                                >
+                                  …
+                                </button>
+                              </div>
+                            </div>
+
+                            {isEditingRow ? (
+                              <div className="mt-1 flex w-full items-start gap-2">
+                                <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
+                                  {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <input
+                                    ref={editInputRef}
+                                    value={editValue}
+                                    onChange={(event) => setEditValue(event.target.value)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        void submitRename(row.item.id);
+                                        return;
+                                      }
+                                      if (event.key === "Escape") {
+                                        event.preventDefault();
+                                        setEditValue(row.item.title);
+                                        exitInlineEdit();
+                                        return;
+                                      }
+                                      if (event.key === "Tab") {
+                                        event.preventDefault();
+                                        cyclePrimaryRoute(event.shiftKey ? -1 : 1);
+                                        return;
+                                      }
+                                      if (event.key === "ArrowDown") {
+                                        event.preventDefault();
+                                        void commitInlineEditIfNeeded().then(() => moveSelection(1, { enterEdit: true }));
+                                        return;
+                                      }
+                                      if (event.key === "ArrowUp") {
+                                        event.preventDefault();
+                                        void commitInlineEditIfNeeded().then(() => moveSelection(-1, { enterEdit: true }));
+                                        return;
+                                      }
+                                    }}
+                                    className="block w-full border-0 bg-transparent p-0 text-[15px] leading-6 text-black outline-none"
+                                  />
+                                  {editParsed ? (
+                                    <span className="mt-1 block text-[11px] text-black/45">Will save as “{editParsed.title}” · {editPreview}</span>
+                                  ) : null}
+                                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                    <select
+                                      value={editProjectId}
+                                      onChange={(event) => {
+                                        const nextProjectId = event.target.value;
+                                        setEditProjectId(nextProjectId);
+                                        void (async () => {
+                                          const title = editValue.trim() || row.item.title;
+                                          const result = await hero.editCapture(row.item.id, title, nextProjectId || fallbackProjectId || undefined);
+                                          if (!result.ok) {
+                                            toast.error(result.message);
+                                            return;
+                                          }
+                                          if (result.message !== "No changes.") {
+                                            showActionToast(result.message);
+                                          }
+                                        })();
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          void submitRename(row.item.id);
+                                        }
+                                        if (event.key === "Escape") {
+                                          event.preventDefault();
+                                          setEditValue(row.item.title);
+                                          exitInlineEdit();
+                                        }
+                                      }}
+                                      className="min-h-8 border border-black/25 bg-white px-2 text-[11px] uppercase tracking-[0.14em] text-black/70 outline-none"
+                                    >
+                                      {hero.projects.map((project) => (
+                                        <option key={project.id} value={project.id}>
+                                          {project.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() => void submitRename(row.item.id)}
+                                      className="min-h-8 border border-black bg-black px-3 text-[11px] uppercase tracking-[0.14em] text-white outline-none sm:hidden"
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                draggable
+                                onMouseEnter={() => {
+                                  if (!editItemId && !rescheduleItemId) {
+                                    selectItem(row.item.id, { fromListNavigation: true });
+                                  }
+                                }}
+                                onDragStart={(event) => {
+                                  event.dataTransfer.effectAllowed = "move";
+                                  event.dataTransfer.setData("text/plain", row.item.id);
+                                  setMenuItemId(null);
+                                  setGrabbedItemId(null);
+                                  setDraggedItemId(row.item.id);
+                                }}
+                                onDragEnd={() => {
+                                  setDraggedItemId(null);
+                                  setDragOverItemId(null);
+                                  setDragOverColumnId(null);
+                                }}
+                                onClick={() => {
+                                  selectItem(row.item.id, { fromListNavigation: true });
+                                  if (window.matchMedia("(max-width: 639px)").matches) {
+                                    void commitInlineEditIfNeeded();
+                                    flushSync(() => beginItemEdit(row.item));
+                                    const input = editInputRef.current;
+                                    if (input) {
+                                      input.focus();
+                                      const end = input.value.length;
+                                      input.setSelectionRange(end, end);
+                                    }
+                                  }
+                                }}
+                                onDoubleClick={() => beginItemEdit(row.item)}
+                                className="mt-1 flex w-full cursor-grab items-start gap-2 text-left active:cursor-grabbing"
+                              >
+                                {row.depth > 0 ? (
+                                  <span className="mt-[5px] text-[10px] text-black/38" style={{ marginLeft: `${Math.min(row.depth, 4) * 10}px` }}>↳</span>
+                                ) : null}
+                                <span className="min-w-0 flex-1">
+                                  <span className="hero-title-text block break-words text-[15px] leading-6 text-black">{row.item.title}</span>
+                                </span>
+                                {isLeavingRow ? (
+                                  <span className="relative ml-2 mt-1 inline-flex h-6 w-6 items-center justify-center">
+                                    {leavingKind === "delete" ? (
+                                      <>
+                                        <span className="hero-delete-burst absolute inset-0 rounded-full" />
+                                        <span className="hero-delete-x-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full text-white text-sm font-bold shadow-[0_6px_18px_rgba(220,38,38,0.35)]">
+                                          ✕
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="hero-done-burst absolute inset-0 rounded-full bg-emerald-400/60" />
+                                        <span className="hero-done-check-mark relative inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-sm font-bold shadow-[0_6px_18px_rgba(5,150,105,0.35)]">
+                                          ✓
+                                        </span>
+                                      </>
+                                    )}
+                                  </span>
+                                ) : null}
+                              </button>
+                            )}
+
+                            {menuItemId === row.item.id ? (
+                              <div className="mt-2 border-l border-black/15 pl-4 text-xs text-black/72">
+                                {rescheduleItemId === row.item.id ? (
+                                  <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                    <input
+                                      autoFocus
+                                      value={rescheduleValue}
+                                      onChange={(event) => setRescheduleValue(event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          void submitReschedule(row.item.id);
+                                        }
+                                        if (event.key === "Escape") {
+                                          event.preventDefault();
+                                          setRescheduleItemId(null);
+                                          blurActiveElement();
+                                        }
+                                      }}
+                                      className="min-h-10 flex-1 border border-black px-3 text-sm outline-none"
+                                    />
+                                    <button type="button" onClick={() => void submitReschedule(row.item.id)} className="min-h-10 border border-black px-3">
+                                      Save
+                                    </button>
+                                  </div>
+                                ) : null}
+
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => beginItemEdit(row.item)}
+                                    className="border border-black px-2 py-1"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRescheduleItemId(row.item.id);
+                                      setRescheduleValue("tomorrow 9am");
+                                      setEditItemId(null);
+                                    }}
+                                    className="border border-black px-2 py-1"
+                                  >
+                                    Reschedule
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setGrabbedItemId((current) => (current === row.item.id ? null : row.item.id))}
+                                    className="border border-black px-2 py-1"
+                                  >
+                                    {grabbedItemId === row.item.id ? "Cancel move" : "Move"}
+                                  </button>
+                                  <button type="button" onClick={() => setActiveItemId(row.item.id)} className="border border-black px-2 py-1">
+                                    Focus
+                                  </button>
+                                </div>
+                              </div>
                             ) : null}
-                            <button type="button" onClick={() => setActiveItemId(row.item.id)} className="border border-black px-2 py-1">
-                              Focus
-                            </button>
+
+                            {grabbedItemId && grabbedItemId !== row.item.id && !draggedItemId ? (
+                              <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.14em] text-black/48">
+                                <button
+                                  type="button"
+                                  onClick={() => void applyMove(grabbedItemId, row.item.id)}
+                                  className="border border-dashed border-black px-2 py-1 hover:border-solid hover:bg-black hover:text-white"
+                                >
+                                  Drop after this
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
-                        </div>
-                      ) : null}
+                        </article>
+                      );
+                    })}
 
-                      {grabbedItemId && grabbedItemId !== row.item.id && !draggedItemId && listMode === "today" ? (
-                        <div className="mt-2 flex flex-wrap gap-2 pl-6 text-[11px] uppercase tracking-[0.14em] text-black/48">
-                          <button
-                            type="button"
-                            onClick={() => void applyMove(grabbedItemId, row.item.id)}
-                            className="border border-dashed border-black px-2 py-1 hover:border-solid hover:bg-black hover:text-white"
-                          >
-                            Drop after this
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
+                    {rows.length === 0 ? (
+                      <div className="px-3 py-8 text-center text-[12px] leading-6 text-black/45">
+                        {sourceId ? "Drop here to move it into this project." : emptyColumnText}
+                      </div>
+                    ) : null}
 
-                    <div className={`flex items-center justify-end gap-1 transition-opacity sm:pl-1 ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
-                      <button
-                        type="button"
-                        disabled={actionsDimmed}
-                        onClick={() => void toggleStar(row.item.id)}
-                        aria-pressed={Boolean(row.item.isStarred)}
-                        className={`inline-flex h-9 w-9 items-center justify-center border transition disabled:cursor-not-allowed ${
-                          row.item.isStarred
-                            ? "border-[#c8941f]/55 hover:border-[#c8941f]"
-                            : "border-black/18 text-black/35 hover:border-black hover:text-black"
-                        }`}
-                        aria-label={row.item.isStarred ? "Unstar task" : "Star task"}
-                        title={row.item.isStarred ? "Unstar (⇧⌘1)" : "Star (⇧⌘1)"}
-                      >
-                        <Star
-                          className="h-4 w-4"
-                          strokeWidth={1.6}
-                          fill={row.item.isStarred ? STAR_GOLD : "none"}
-                          color={row.item.isStarred ? STAR_GOLD : "currentColor"}
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        ref={(el) => {
-                          if (el) doneButtonRefs.current.set(row.item.id, el);
-                          else doneButtonRefs.current.delete(row.item.id);
-                        }}
-                        disabled={actionsDimmed || isLeavingRow}
-                        onClick={() => void markDone(row.item.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center gap-1 border border-black/22 px-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/60 transition hover:border-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed sm:w-auto sm:min-w-[74px] sm:px-2"
-                        aria-label="Mark task as done"
-                        title="Mark task as done"
-                      >
-                        <span aria-hidden="true">✓</span>
-                        <span className="hidden sm:inline">Done</span>
-                      </button>
-                      <button
-                        type="button"
-                        ref={(el) => {
-                          if (el) deleteButtonRefs.current.set(row.item.id, el);
-                          else deleteButtonRefs.current.delete(row.item.id);
-                        }}
-                        disabled={actionsDimmed || isLeavingRow}
-                        onClick={() => void removeItem(row.item.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed"
-                        aria-label="Delete task"
-                      >
-                        🗑
-                      </button>
-                      <button
-                        type="button"
-                        disabled={actionsDimmed}
-                        onClick={() => setMenuItemId((current) => (current === row.item.id ? null : row.item.id))}
-                        className="hidden h-9 w-9 items-center justify-center border border-black/18 text-black/45 hover:border-black hover:text-black disabled:cursor-not-allowed sm:inline-flex"
-                        aria-label="More actions"
-                      >
-                        …
-                      </button>
-                    </div>
+                    {grabbedItemId && !draggedItemId && columnIdByItemId.get(grabbedItemId) !== column.id ? (
+                      <div className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => void applyMoveToColumn(grabbedItemId, column.id)}
+                          className="w-full border border-dashed border-black px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-black/60 hover:border-solid hover:bg-black hover:text-white"
+                        >
+                          Move into {column.name}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                </article>
+                </section>
               );
             })}
-
-            {displayRows.length === 0 ? (
-              <div className="px-4 py-12 text-sm leading-7 text-black/62">
-                {listMode === "today"
-                  ? "Nothing is due today yet. Add one line above, with a task and its wake-up time."
-                  : listMode === "tomorrow"
-                    ? "Nothing is due tomorrow yet. Add a task with a tomorrow wake-up time and it will appear here."
-                    : "No upcoming tasks. Add a task with its wake-up time and it will appear here."}
-              </div>
-            ) : null}
           </div>
 
           {/* Trophy shelf: starred tasks finished today linger here as a vanity
@@ -1654,7 +1786,7 @@ export default function Home() {
             <div className="text-[12px] font-semibold uppercase tracking-[0.22em] text-black">
               {activeItemId
                 ? "Task active"
-                : grabbedItemId
+                : grabbedItemId || draggedItemId
                   ? "Move mode"
                   : rescheduleItemId
                     ? "Rescheduling task"
@@ -1669,15 +1801,15 @@ export default function Home() {
             <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-black/48">
               {activeItemId
                 ? "Everything else is dimmed · Press Escape to exit."
-                : grabbedItemId
-                  ? "Pick a task and drop after it · the moved task slots directly below."
+                : grabbedItemId || draggedItemId
+                  ? "Drop after a task to slot below it, or onto a project's empty space to move it there."
                   : rescheduleItemId
                     ? "Type a new wake-up time · Enter saves · Escape cancels."
                     : editItemId
                       ? "Enter saves · Escape exits edit · ↑ / ↓ move to the next task · ⇧⌘D to mark done · ⇧⌘⌫ to delete · ⇧⌘A to activate task."
                       : captureFocused
-                        ? "Enter saves · Escape clears focus · ↓ jumps into the first task."
-                        : "Press T for a new task · ↑ / ↓ edit as you browse · ⇧⌘A to activate the hovered task · Escape returns to shortcuts · ? for help."}
+                        ? "Enter saves · no time means it wakes up in 5 minutes · Escape clears focus · ↓ jumps into this project's list."
+                        : "Press T for a new task · ↑ / ↓ edit as you browse · drag tasks between projects · ⇧⌘A to activate the hovered task · ? for help."}
             </div>
           </footer>
         </section>

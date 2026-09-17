@@ -3,6 +3,7 @@ Design note for this file:
 - Keep Hero fast and opinionated, but make the state layer honest about storage: demo, local fallback, or live Supabase.
 - Preserve compact domain objects and shortcut-driven actions rather than introducing heavy app architecture.
 - The web rebuild should support per-user hosted sync with simple email/password auth first, while remaining usable before external setup is finished.
+- Live mode is local-first: mutations hit the synced store (memory + localStorage) and resolve instantly; the Supabase write happens in a background outbox. The hook never waits on the network after boot.
 */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as chrono from "chrono-node";
@@ -51,6 +52,7 @@ import {
   readPreferences,
 } from "@/lib/heroStore.local";
 import { createRemoteStore } from "@/lib/heroStore.remote";
+import { createSyncedStore, type SyncStatus, type SyncedStore } from "@/lib/heroStore.synced";
 
 export {
   MAX_STARRED_TASKS,
@@ -66,6 +68,7 @@ export {
   type HeroUser,
   type ParsedCaptureInput,
   type ProjectTone,
+  type SyncStatus,
 };
 
 function resolveDefaultProjectId(projects: HeroProject[], preferredProjectId?: string | null) {
@@ -350,6 +353,7 @@ export function useHeroApp() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [remoteReady, setRemoteReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [statusMessage, setStatusMessage] = useState<string>(
     supabaseConfigured
       ? "Hosted sync is ready. Sign in with email and password to load your Hero workspace."
@@ -361,6 +365,15 @@ export function useHeroApp() {
   // ref rather than state because the store change is always paired with an
   // applySnapshot/setProjects/setItems that already triggers a re-render.
   const storeRef = useRef<HeroStore | null>(null);
+  // The live-mode synced store, kept separately so it can be disposed (timers,
+  // focus/online listeners) when the user changes or signs out.
+  const syncedRef = useRef<SyncedStore | null>(null);
+
+  const disposeSynced = useCallback(() => {
+    syncedRef.current?.dispose();
+    syncedRef.current = null;
+    setSyncStatus("idle");
+  }, []);
 
   const applySnapshot = useCallback((snapshot: HeroSnapshot, userId: string, persistLocally = false) => {
     const resolvedDefaultProjectId = resolveDefaultProjectId(snapshot.projects, readPreferences(userId).defaultProjectId);
@@ -376,6 +389,8 @@ export function useHeroApp() {
 
   const loadUserSnapshot = useCallback(
     async (nextUser: HeroUser) => {
+      disposeSynced();
+
       if (nextUser.mode === "demo") {
         const stored = readLocalSnapshot(nextUser.id) ?? createSeedSnapshot();
         if (!readLocalSnapshot(nextUser.id)) {
@@ -388,14 +403,24 @@ export function useHeroApp() {
         return;
       }
 
-      const remoteStore = createRemoteStore(nextUser.id, getAccessToken);
+      const synced = createSyncedStore(nextUser.id, createRemoteStore(nextUser.id, getAccessToken));
       try {
-        const remoteSnapshot = await remoteStore.loadSnapshot();
-        storeRef.current = remoteStore;
-        applySnapshot(remoteSnapshot, nextUser.id);
+        const snapshot = await synced.loadSnapshot();
+        storeRef.current = synced;
+        syncedRef.current = synced;
+        applySnapshot(snapshot, nextUser.id);
+        // Background pulls only replace the data; selection and the default
+        // project survive so a pull never yanks the cursor mid-edit.
+        synced.subscribe((next) => {
+          setProjects(next.projects);
+          setItems(next.items);
+          setDefaultProjectIdState((current) => resolveDefaultProjectId(next.projects, current));
+        });
+        synced.onStatus((status) => setSyncStatus(status));
         setRemoteReady(true);
-        setStatusMessage("Google sign-in and Supabase sync are live.");
+        setStatusMessage("Supabase sync is live. Changes save locally first and sync in the background.");
       } catch (error) {
+        synced.dispose();
         storeRef.current = createLocalStore(nextUser.id);
         const localFallback = readLocalSnapshot(nextUser.id) ?? { projects: [], items: [] };
         applySnapshot(localFallback, nextUser.id, !readLocalSnapshot(nextUser.id));
@@ -411,7 +436,7 @@ export function useHeroApp() {
         }
       }
     },
-    [applySnapshot],
+    [applySnapshot, disposeSynced],
   );
 
   useEffect(() => {
@@ -445,6 +470,7 @@ export function useHeroApp() {
         if (!active) return;
 
         if (!changedUser) {
+          disposeSynced();
           storeRef.current = null;
           setUser(null);
           setProjects([]);
@@ -466,8 +492,9 @@ export function useHeroApp() {
     return () => {
       active = false;
       unsubscribe();
+      disposeSynced();
     };
-  }, [loadUserSnapshot]);
+  }, [disposeSynced, loadUserSnapshot]);
 
   const upcomingItems = useMemo(() => {
     return items
@@ -899,7 +926,9 @@ export function useHeroApp() {
   // target. So when there isn't room for a full minute, the task is placed at
   // the midpoint between the target and whatever follows it, which keeps it
   // strictly between the two. It also adopts the target's chain parent so it
-  // lands as a sibling of the target rather than dangling in an unrelated chain.
+  // lands as a sibling of the target rather than dangling in an unrelated chain,
+  // and the target's project, so dropping onto a row in another project's
+  // container moves the task into that container at that position.
   const moveItem = useCallback(
     async (itemId: string, targetId: string): Promise<MutationResult> => {
       const source = items.find((item) => item.id === itemId);
@@ -935,17 +964,57 @@ export function useHeroApp() {
           : targetTime + Math.floor((nextTime - targetTime) / 2);
 
       const nextDueAt = new Date(nextDueAtMs).toISOString();
-      const result = await updateItem(itemId, {
+      const targetProjectId =
+        sanitizeProjectId(target.projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined;
+      const sourceProjectId =
+        sanitizeProjectId(source.projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined;
+      const patch: Partial<HeroItem> = {
         dueAt: nextDueAt,
         brokenDownFromId: target.brokenDownFromId,
-      });
+      };
+      if (targetProjectId !== sourceProjectId) patch.projectId = targetProjectId;
+
+      const result = await updateItem(itemId, patch);
 
       if (!result.ok) return result;
       setUndoState({ kind: "update", item: source });
-      return { ok: true, message: `Moved after “${target.title}”.` };
+      const projectName = projects.find((project) => project.id === targetProjectId)?.name;
+      return {
+        ok: true,
+        message:
+          patch.projectId !== undefined && projectName
+            ? `Moved to ${projectName}, after “${target.title}”.`
+            : `Moved after “${target.title}”.`,
+      };
     },
-    [items, updateItem],
+    [defaultProjectId, items, projects, updateItem],
   );
+
+  // Container drop: dropping a task on a project's empty area (or header)
+  // moves it into that project without retiming it. Returns ok with "No
+  // changes." when it is already there so the UI can stay quiet.
+  const moveItemToProject = useCallback(
+    async (itemId: string, projectId: string | undefined): Promise<MutationResult> => {
+      const source = items.find((item) => item.id === itemId);
+      if (!source) return { ok: false, message: "Hero could not find that task to move." };
+
+      const nextProjectId = sanitizeProjectId(projectId);
+      const currentProjectId =
+        sanitizeProjectId(source.projectId) ?? resolveDefaultProjectId(projects, defaultProjectId) ?? undefined;
+      if (nextProjectId === currentProjectId) return { ok: true, message: "No changes." };
+
+      const result = await updateItem(itemId, { projectId: nextProjectId });
+      if (!result.ok) return result;
+      setUndoState({ kind: "update", item: source });
+      const projectName = projects.find((project) => project.id === nextProjectId)?.name ?? "Unsorted";
+      return { ok: true, message: `Moved to ${projectName}.` };
+    },
+    [defaultProjectId, items, projects, updateItem],
+  );
+
+  const syncNow = useCallback(async () => {
+    await syncedRef.current?.syncNow();
+  }, []);
 
   const signIn = useCallback(async (): Promise<MutationResult> => {
     if (!supabaseConfigured) {
@@ -1031,6 +1100,7 @@ export function useHeroApp() {
 
   const signOut = useCallback(async () => {
     if (!supabaseConfigured || user?.mode === "demo") {
+      disposeSynced();
       storeRef.current = null;
       setUser(null);
       setProjects([]);
@@ -1040,7 +1110,7 @@ export function useHeroApp() {
       return;
     }
     await authSignOut();
-  }, [user?.mode]);
+  }, [disposeSynced, user?.mode]);
 
   const streak = useMemo(() => {
     const dates = new Set(
@@ -1082,6 +1152,7 @@ export function useHeroApp() {
     starredDoneTodayItems,
     statusMessage,
     streak,
+    syncStatus,
     upcomingItems,
     undoState,
     user,
@@ -1094,6 +1165,7 @@ export function useHeroApp() {
     formatPreviewFromInput,
     markDone,
     moveItem,
+    moveItemToProject,
     parseCaptureInput,
     previewCaptureInput,
     removeItem,
@@ -1105,6 +1177,7 @@ export function useHeroApp() {
     signInWithPassword,
     signOut,
     signUpWithPassword,
+    syncNow,
     toggleStar,
     undoLastAction,
     updateProject,
