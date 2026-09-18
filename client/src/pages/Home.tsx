@@ -1498,9 +1498,9 @@ export default function Home() {
 
                             {isEditingRow ? (
                               <div className="mt-1 flex w-full items-start gap-2">
-                                <span className="mt-[5px] flex items-center gap-2 text-[10px] text-black/38">
-                                  {row.depth > 0 ? <span>↳</span> : <span className="sr-only">Root task</span>}
-                                </span>
+                                {row.depth > 0 ? (
+                                  <span className="mt-[5px] text-[10px] text-black/38" style={{ marginLeft: `${Math.min(row.depth, 4) * 10}px` }}>↳</span>
+                                ) : null}
                                 <div className="min-w-0 flex-1">
                                   <input
                                     ref={editInputRef}
@@ -1573,18 +1573,15 @@ export default function Home() {
                                 }}
                                 onClick={() => {
                                   selectItem(row.item.id, { fromListNavigation: true });
-                                  if (window.matchMedia("(max-width: 639px)").matches) {
-                                    void commitInlineEditIfNeeded();
-                                    flushSync(() => beginItemEdit(row.item));
-                                    const input = editInputRef.current;
-                                    if (input) {
-                                      input.focus();
-                                      const end = input.value.length;
-                                      input.setSelectionRange(end, end);
-                                    }
+                                  void commitInlineEditIfNeeded();
+                                  flushSync(() => beginItemEdit(row.item));
+                                  const input = editInputRef.current;
+                                  if (input) {
+                                    input.focus();
+                                    const end = input.value.length;
+                                    input.setSelectionRange(end, end);
                                   }
                                 }}
-                                onDoubleClick={() => beginItemEdit(row.item)}
                                 className="mt-1 flex w-full cursor-grab items-start gap-2 text-left active:cursor-grabbing"
                               >
                                 {row.depth > 0 ? (
