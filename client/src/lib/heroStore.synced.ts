@@ -15,9 +15,16 @@ Design note for this file:
   An op is only coalesced into an earlier op when that would not reorder it ahead
   of a project / parent-item insert it references.
 - Failure policy: network errors, timeouts, missing token, 401/408/429/5xx keep
-  the op and retry later ("offline"). 409 duplicate on insert converts to an
-  update (the previous attempt landed but the response was lost). Any other 4xx
-  drops the op with a console warning, because replaying it can never succeed.
+  the op and retry later ("offline"). A duplicate-key (23505) insert converts to
+  an update (the previous attempt landed but the response was lost). A foreign
+  key miss (23503 — the project or parent task no longer exists remotely) retries
+  the insert without that reference so the task lands in Unsorted instead of
+  vanishing. Any other 4xx drops the op, because replaying it can never succeed,
+  and reports it through onRejected so the UI can say so — the next pull would
+  otherwise erase the row with no explanation.
+- A disposed store (sign-out, user switch) must stop touching shared storage:
+  its in-flight request may still resolve, but it no longer persists the outbox
+  or the snapshot, so it can't clobber what its replacement wrote.
 - Still no supabase-js data calls, and no optimistic React state: the hook sets
   state from the row this store returns, exactly as with the other stores.
 */
@@ -53,6 +60,8 @@ type PendingOp =
 export interface SyncedStore extends HeroStore {
   /** Fires whenever a background pull changes the snapshot. */
   subscribe(listener: (snapshot: HeroSnapshot) => void): () => void;
+  /** Fires when the server permanently rejects a local write (it was dropped). */
+  onRejected(listener: (message: string) => void): () => void;
   /** Fires on every sync status transition. */
   onStatus(listener: (status: SyncStatus, message?: string) => void): () => void;
   /** Flush the outbox and pull now (single-flight; re-queues if one is running). */
@@ -125,11 +134,18 @@ function isRetryable(error: unknown) {
   return true;
 }
 
+// PostgREST answers 409 for both unique (23505) and foreign-key (23503)
+// violations, so the status alone can't tell "already inserted" apart from
+// "references a row the server doesn't have".
 function isDuplicate(error: unknown) {
   return (
     error instanceof PostgrestRequestError &&
-    (error.status === 409 || error.code === "23505" || /duplicate key/i.test(error.message))
+    (error.code === "23505" || (error.code === undefined && /duplicate key/i.test(error.message)))
   );
+}
+
+function isMissingReference(error: unknown) {
+  return error instanceof PostgrestRequestError && error.code === "23503";
 }
 
 function describe(error: unknown) {
@@ -152,6 +168,7 @@ export function createSyncedStore(userId: string, remote: HeroStore): SyncedStor
 
   const snapshotListeners = new Set<(snapshot: HeroSnapshot) => void>();
   const statusListeners = new Set<(status: SyncStatus, message?: string) => void>();
+  const rejectedListeners = new Set<(message: string) => void>();
 
   function setStatus(next: SyncStatus, message?: string) {
     if (status === next && !message) return;
@@ -246,6 +263,11 @@ export function createSyncedStore(userId: string, remote: HeroStore): SyncedStor
         try {
           await remote.insertItem(op.item);
         } catch (error) {
+          if (isMissingReference(error)) {
+            console.warn("[hero][sync] insert referenced a missing row; saving without it", op.id, describe(error));
+            await remote.insertItem({ ...op.item, projectId: undefined, brokenDownFromId: undefined });
+            return;
+          }
           if (!isDuplicate(error)) throw error;
           const { id: _id, ...rest } = op.item;
           await remote.updateItem(op.id, rest);
@@ -269,22 +291,48 @@ export function createSyncedStore(userId: string, remote: HeroStore): SyncedStor
       try {
         await performOp(op);
       } catch (error) {
+        if (disposed) return false;
         if (isRetryable(error)) {
           outbox = [op, ...outbox];
           inFlight = null;
           persistOutbox(userId, outbox);
           throw error;
         }
-        console.warn("[hero][sync] dropping unfulfillable write", op.kind, op.id, describe(error));
+        console.error("[hero][sync] dropping unfulfillable write", op.kind, op.id, describe(error));
+        const message = rejectionMessage(op, error);
+        if (message) rejectedListeners.forEach((listener) => listener(message));
       }
+      // Our replacement owns the persisted outbox now; it will replay this op
+      // (idempotently) rather than have us overwrite its queue.
+      if (disposed) return false;
       inFlight = null;
       persistOutbox(userId, outbox);
     }
     return outbox.length === 0;
   }
 
+  function rejectionMessage(op: PendingOp, error: unknown) {
+    const reason = describe(error);
+    switch (op.kind) {
+      case "insertItem":
+        return `The server rejected “${op.item.title}”: ${reason}`;
+      case "updateItem":
+      case "deleteItem": {
+        // A write to a row deleted elsewhere is expected and not worth a toast.
+        if (error instanceof PostgrestRequestError && error.status === 404) return null;
+        const title = snapshot.items.find((item) => item.id === op.id)?.title;
+        return `Couldn't sync a change${title ? ` to “${title}”` : ""}: ${reason}`;
+      }
+      case "insertProject":
+        return `The server rejected project “${op.project.name}”: ${reason}`;
+      case "updateProject":
+        return `Couldn't sync a project change: ${reason}`;
+    }
+  }
+
   async function pull() {
     const fresh = await remote.loadSnapshot();
+    if (disposed) return;
     // Anything queued while the pull was in flight is newer than the server's
     // view; rebase it on top so local intent is never clobbered by a pull.
     let next = fresh;
@@ -409,6 +457,11 @@ export function createSyncedStore(userId: string, remote: HeroStore): SyncedStor
       return () => snapshotListeners.delete(listener);
     },
 
+    onRejected(listener) {
+      rejectedListeners.add(listener);
+      return () => rejectedListeners.delete(listener);
+    },
+
     onStatus(listener) {
       statusListeners.add(listener);
       listener(status);
@@ -430,6 +483,7 @@ export function createSyncedStore(userId: string, remote: HeroStore): SyncedStor
       document.removeEventListener("visibilitychange", onVisible);
       snapshotListeners.clear();
       statusListeners.clear();
+      rejectedListeners.clear();
     },
   };
 }

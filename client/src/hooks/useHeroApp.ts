@@ -7,6 +7,7 @@ Design note for this file:
 */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as chrono from "chrono-node";
+import { toast } from "sonner";
 import { type Session } from "@supabase/supabase-js";
 
 import {
@@ -368,10 +369,20 @@ export function useHeroApp() {
   // The live-mode synced store, kept separately so it can be disposed (timers,
   // focus/online listeners) when the user changes or signs out.
   const syncedRef = useRef<SyncedStore | null>(null);
+  // Which user the live synced store belongs to. supabase-js fires SIGNED_IN on
+  // every tab-visible and TOKEN_REFRESHED after each refresh; rebuilding the
+  // store for those would reset selection and race the old store's in-flight
+  // sync against the new one, so same-user events are ignored.
+  const syncedUserIdRef = useRef<string | null>(null);
+  // Bumped on every loadUserSnapshot call. Auth events aren't awaited, so two
+  // loads can overlap; only the newest may install its store, and the loser
+  // disposes its own instead of leaking a second store that keeps publishing.
+  const loadGenerationRef = useRef(0);
 
   const disposeSynced = useCallback(() => {
     syncedRef.current?.dispose();
     syncedRef.current = null;
+    syncedUserIdRef.current = null;
     setSyncStatus("idle");
   }, []);
 
@@ -389,6 +400,7 @@ export function useHeroApp() {
 
   const loadUserSnapshot = useCallback(
     async (nextUser: HeroUser) => {
+      const generation = ++loadGenerationRef.current;
       disposeSynced();
 
       if (nextUser.mode === "demo") {
@@ -406,8 +418,13 @@ export function useHeroApp() {
       const synced = createSyncedStore(nextUser.id, createRemoteStore(nextUser.id, getAccessToken));
       try {
         const snapshot = await synced.loadSnapshot();
+        if (generation !== loadGenerationRef.current) {
+          synced.dispose();
+          return;
+        }
         storeRef.current = synced;
         syncedRef.current = synced;
+        syncedUserIdRef.current = nextUser.id;
         applySnapshot(snapshot, nextUser.id);
         // Background pulls only replace the data; selection and the default
         // project survive so a pull never yanks the cursor mid-edit.
@@ -417,10 +434,12 @@ export function useHeroApp() {
           setDefaultProjectIdState((current) => resolveDefaultProjectId(next.projects, current));
         });
         synced.onStatus((status) => setSyncStatus(status));
+        synced.onRejected((message) => toast.error(message, { duration: 10_000 }));
         setRemoteReady(true);
         setStatusMessage("Supabase sync is live. Changes save locally first and sync in the background.");
       } catch (error) {
         synced.dispose();
+        if (generation !== loadGenerationRef.current) return;
         storeRef.current = createLocalStore(nextUser.id);
         const localFallback = readLocalSnapshot(nextUser.id) ?? { projects: [], items: [] };
         applySnapshot(localFallback, nextUser.id, !readLocalSnapshot(nextUser.id));
@@ -470,6 +489,7 @@ export function useHeroApp() {
         if (!active) return;
 
         if (!changedUser) {
+          loadGenerationRef.current += 1;
           disposeSynced();
           storeRef.current = null;
           setUser(null);
@@ -483,6 +503,7 @@ export function useHeroApp() {
         }
 
         setUser(changedUser);
+        if (syncedUserIdRef.current === changedUser.id) return;
         await loadUserSnapshot(changedUser);
       });
     }
@@ -492,6 +513,7 @@ export function useHeroApp() {
     return () => {
       active = false;
       unsubscribe();
+      loadGenerationRef.current += 1;
       disposeSynced();
     };
   }, [disposeSynced, loadUserSnapshot]);

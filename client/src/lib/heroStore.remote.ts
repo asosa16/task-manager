@@ -126,6 +126,29 @@ async function postgrestFetch<T>(
   }
 }
 
+// Supabase caps every PostgREST response at max-rows (1000 by default) without
+// saying so. The synced store treats a pull as the whole truth, so a truncated
+// page would silently delete every row past the cap from the local snapshot.
+const PAGE_SIZE = 1000;
+
+async function fetchAllRows<T>(
+  getAccessToken: () => Promise<string | null>,
+  path: string,
+  query: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const page =
+      (await postgrestFetch<T[]>(getAccessToken, {
+        method: "GET",
+        path,
+        query: `${query}&limit=${PAGE_SIZE}&offset=${offset}`,
+      })) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+  }
+}
+
 export function createRemoteStore(
   userId: string,
   getAccessToken: () => Promise<string | null>,
@@ -138,21 +161,13 @@ export function createRemoteStore(
   return {
     async loadSnapshot(): Promise<HeroSnapshot> {
       const [projectRows, itemRows] = await Promise.all([
-        postgrestFetch<ProjectRow[]>(getAccessToken, {
-          method: "GET",
-          path: "projects",
-          query: `select=*&${userFilter}&order=created_at.asc`,
-        }),
-        postgrestFetch<ItemRow[]>(getAccessToken, {
-          method: "GET",
-          path: "items",
-          query: `select=*&${userFilter}&order=due_at.asc`,
-        }),
+        fetchAllRows<ProjectRow>(getAccessToken, "projects", `select=*&${userFilter}&order=created_at.asc,id.asc`),
+        fetchAllRows<ItemRow>(getAccessToken, "items", `select=*&${userFilter}&order=due_at.asc,id.asc`),
       ]);
 
       return {
-        projects: (projectRows ?? []).map(mapProjectRow),
-        items: (itemRows ?? []).map(mapItemRow),
+        projects: projectRows.map(mapProjectRow),
+        items: itemRows.map(mapItemRow),
       };
     },
 
