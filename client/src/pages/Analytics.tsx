@@ -8,8 +8,7 @@ import { useMemo } from "react";
 import { useLocation } from "wouter";
 import { getLocalDayKey, useHeroApp } from "@/hooks/useHeroApp";
 
-const heroLogo =
-  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
+const heroLogo = "/hero-logo.png";
 
 function formatDayLabel(input: string) {
   const [year, month, day] = input.split("-").map(Number);

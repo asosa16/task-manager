@@ -30,8 +30,7 @@ import {
 const STAR_GOLD = "#c8941f";
 const UNSORTED_COLUMN_ID = "";
 
-const heroLogo =
-  "https://d2xsxph8kpxj0f.cloudfront.net/310519663183942827/auuJbr6QdBfQAgc8r4WcfX/hero-128_efe10397.png";
+const heroLogo = "/hero-logo.png";
 
 const primaryRouteOrder = ["/", "/tomorrow", "/all", "/done"] as const;
 const projectToneOptions: ProjectTone[] = ["moss", "slate", "amber", "clay", "ink"];
