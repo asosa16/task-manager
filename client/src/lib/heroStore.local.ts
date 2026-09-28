@@ -82,14 +82,14 @@ function createSeedItems(projects: HeroProject[]): HeroItem[] {
   return [
     {
       id: createRecordId(),
-      title: "Write the launch plan for Hero Web",
+      title: "Write the launch plan for Task Man",
       type: "task",
       status: "upcoming",
       dueAt: offsetHours(-2),
       createdAt: now,
       updatedAt: now,
       projectId: projects[1]?.id,
-      originalTitle: "Write the launch plan for Hero Web",
+      originalTitle: "Write the launch plan for Task Man",
     },
     {
       id: createRecordId(),

@@ -1,6 +1,6 @@
 /*
 Design note for this file:
-- Re-center Hero on the original extension ritual: one line in, one calm list out.
+- Re-center Task Man on the original extension ritual: one line in, one calm list out.
 - Keep the surface sparse and monochrome; secondary actions should stay hidden until asked for.
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
 - Every project is its own container, all visible at once. Each container has its own one-line
@@ -279,62 +279,77 @@ function HelpPanel({
 }
 
 function AuthShell({
-  onSignIn,
-  onSignUp,
+  onSendMagicLink,
 }: {
-  onSignIn: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
-  onSignUp: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
+  onSendMagicLink: (email: string) => Promise<{ ok: boolean; message: string }>;
 }) {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    return params.has("error")
+      ? "This sign-in link is invalid or has expired. Request a new link below."
+      : "";
+  });
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result =
-      mode === "signin" ? await onSignIn(email, password) : await onSignUp(email, password);
-
-    if (!result.ok) return toast.error(result.message);
-    toast.success(result.message);
+    if (sending) return;
+    setSending(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await onSendMagicLink(email);
+      if (!result.ok) setError(result.message);
+      else setNotice(result.message);
+    } catch {
+      setError("Could not send the sign-in link. Please try again.");
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
     <main className="min-h-screen bg-[#f6f6f3] px-4 py-8 text-black">
       <div className="mx-auto max-w-md border border-black bg-white p-5 shadow-[10px_10px_0_rgba(0,0,0,0.05)]">
         <div className="flex items-center gap-3 border-b border-black pb-3 text-sm font-semibold">
-          <img src={heroLogo} alt="Hero logo" className="h-7 w-7 rounded-[10px]" />
-          <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+          <img src={heroLogo} alt="Task Man logo" className="h-7 w-7 rounded-[10px]" />
+          <span className="text-[15px] uppercase tracking-[0.18em]">Task Man</span>
         </div>
         <div className="mt-5 space-y-2">
-          <h1 className="text-[24px] font-semibold leading-none">Minimal again.</h1>
+          <h1 className="text-[24px] font-semibold leading-none">Sign in to Task Man.</h1>
           <p className="text-sm leading-6 text-black/68">
-            Sign in to keep the same task list usable in the browser and on your phone.
+            Enter your email and we’ll send you a magic link. No password needed.
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+        <form onSubmit={handleSubmit} className="mt-5 space-y-3" aria-busy={sending}>
+          <label htmlFor="signin-email" className="block text-sm font-medium">Email</label>
           <input
+            id="signin-email"
+            type="email"
+            autoComplete="email"
+            required
+            disabled={sending}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="Email"
+            placeholder="you@example.com"
             className="min-h-11 w-full border border-black bg-white px-3 text-sm outline-none"
           />
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
-            className="min-h-11 w-full border border-black bg-white px-3 text-sm outline-none"
-          />
-          <button type="submit" className="inline-flex min-h-11 w-full items-center justify-center border border-black bg-black px-4 text-sm text-white">
-            {mode === "signin" ? "Sign in" : "Create account"}
+          <button type="submit" disabled={sending} className="inline-flex min-h-11 w-full items-center justify-center border border-black bg-black px-4 text-sm text-white disabled:cursor-wait disabled:opacity-60">
+            {sending ? "Sending…" : notice ? "Send another link" : "Send magic link"}
           </button>
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          {notice && (
+            <div role="status" className="space-y-1 text-sm leading-6 text-black/68">
+              <p>{notice}</p>
+              <p>Open the link to sign in. If it hasn’t arrived, check your spam folder.</p>
+            </div>
+          )}
         </form>
-        <div className="mt-3 flex items-center justify-between text-xs text-black/68">
-          <span>{mode === "signin" ? "Need an account?" : "Already have an account?"}</span>
-          <button type="button" onClick={() => setMode(mode === "signin" ? "signup" : "signin")} className="font-semibold text-black">
-            {mode === "signin" ? "Create one" : "Sign in"}
-          </button>
-        </div>
+        <p className="mt-3 text-xs leading-5 text-black/68">
+          Use your existing account email to access your tasks. New to Task Man? Your first link creates your account.
+        </p>
       </div>
     </main>
   );
@@ -1059,20 +1074,20 @@ export default function Home() {
       <main className="flex min-h-screen items-center justify-center bg-[#f6f6f3] text-black/55">
         <div
           role="status"
-          aria-label="Loading Hero"
+          aria-label="Loading Task Man"
           className="flex items-center gap-[10px] text-[11px] uppercase tracking-[0.18em]"
         >
           <span className="hero-initial-dot" />
           <span className="hero-initial-dot" style={{ animationDelay: "0.15s" }} />
           <span className="hero-initial-dot" style={{ animationDelay: "0.3s" }} />
-          <span>Hero</span>
+          <span>Task Man</span>
         </div>
       </main>
     );
   }
 
   if (!hero.user) {
-    return <AuthShell onSignIn={hero.signInWithPassword} onSignUp={hero.signUpWithPassword} />;
+    return <AuthShell onSendMagicLink={hero.sendMagicLink} />;
   }
 
   const sourceId = draggedItemId || grabbedItemId;
@@ -1093,8 +1108,8 @@ export default function Home() {
             <div className="relative flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-4 text-sm font-semibold">
                 <div className="flex items-center gap-3">
-                  <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
-                  <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+                  <img src={heroLogo} alt="Task Man logo" className="h-8 w-8 rounded-[12px]" />
+                  <span className="text-[15px] uppercase tracking-[0.18em]">Task Man</span>
                 </div>
                 <span className="hidden h-6 w-px bg-black/15 sm:inline-block" aria-hidden="true" />
                 <HeaderClock />

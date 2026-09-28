@@ -35,8 +35,8 @@ export default function Done() {
         <header className="border-b border-black px-3 py-3 sm:px-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 text-sm font-semibold">
-              <img src={heroLogo} alt="Hero logo" className="h-8 w-8 rounded-[12px]" />
-              <span className="text-[15px] uppercase tracking-[0.18em]">Hero</span>
+              <img src={heroLogo} alt="Task Man logo" className="h-8 w-8 rounded-[12px]" />
+              <span className="text-[15px] uppercase tracking-[0.18em]">Task Man</span>
             </div>
             <nav className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.16em] text-black/58">
               <button type="button" onClick={() => navigate("/")} className="hover:text-black">

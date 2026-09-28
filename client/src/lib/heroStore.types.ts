@@ -1,6 +1,6 @@
 /*
 Design note for this file:
-- Hosts every type, constant, and pure helper that both the local and remote Hero stores need.
+- Hosts every type, constant, and pure helper that both the local and remote Task Man stores need.
 - Pure and side-effect free: no I/O, no React, no Supabase client. Safe to import from anywhere.
 - Centralizes the domain↔row marshaling so the local store and the remote store can't drift.
 */

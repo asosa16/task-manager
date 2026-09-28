@@ -255,18 +255,12 @@ export async function getInitialSession(): Promise<Session | null> {
   return data.session;
 }
 
-export async function signInWithPassword(email: string, password: string) {
+export async function sendMagicLink(email: string, emailRedirectTo: string) {
   if (!supabase) throw new Error("Supabase is not configured.");
-  return supabase.auth.signInWithPassword({ email, password });
-}
-
-export async function signUpWithPassword(
-  email: string,
-  password: string,
-  emailRedirectTo: string,
-) {
-  if (!supabase) throw new Error("Supabase is not configured.");
-  return supabase.auth.signUp({ email, password, options: { emailRedirectTo } });
+  return supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo, shouldCreateUser: true },
+  });
 }
 
 export async function signOut() {

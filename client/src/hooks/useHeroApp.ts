@@ -1,8 +1,8 @@
 /*
 Design note for this file:
-- Keep Hero fast and opinionated, but make the state layer honest about storage: demo, local fallback, or live Supabase.
+- Keep Task Man fast and opinionated, but make the state layer honest about storage: demo, local fallback, or live Supabase.
 - Preserve compact domain objects and shortcut-driven actions rather than introducing heavy app architecture.
-- The web rebuild should support per-user hosted sync with simple email/password auth first, while remaining usable before external setup is finished.
+- The web rebuild should support per-user hosted sync with email magic link auth, while remaining usable before external setup is finished.
 - Live mode is local-first: mutations hit the synced store (memory + localStorage) and resolve instantly; the Supabase write happens in a background outbox. The hook never waits on the network after boot.
 */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,9 +14,8 @@ import {
   getAccessToken,
   getInitialSession,
   onAuthChange,
-  signInWithPassword as authSignInWithPassword,
+  sendMagicLink as authSendMagicLink,
   signOut as authSignOut,
-  signUpWithPassword as authSignUpWithPassword,
   supabaseConfigured,
 } from "@/lib/heroAuth";
 
@@ -313,7 +312,7 @@ async function getSupabaseUserFromSession(session: Session | null): Promise<Hero
       session.user.user_metadata?.full_name ||
       session.user.user_metadata?.name ||
       session.user.email?.split("@")[0] ||
-      "Hero User",
+      "Task Man User",
     email: session.user.email || "",
     avatarUrl: session.user.user_metadata?.avatar_url,
     mode: "supabase",
@@ -357,7 +356,7 @@ export function useHeroApp() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [statusMessage, setStatusMessage] = useState<string>(
     supabaseConfigured
-      ? "Hosted sync is ready. Sign in with email and password to load your Hero workspace."
+      ? "Hosted sync is ready. Sign in with an email magic link to load your Task Man workspace."
       : "Demo mode is active until Supabase keys are added.",
   );
 
@@ -446,11 +445,11 @@ export function useHeroApp() {
         setRemoteReady(false);
         if (error instanceof SchemaMissingError) {
           setStatusMessage(
-            "Google sign-in is live, but database tables are not ready yet. Hero is using a private local fallback until the Supabase schema is applied.",
+            "Email sign-in is live, but database tables are not ready yet. Task Man is using a private local fallback until the Supabase schema is applied.",
           );
         } else {
           setStatusMessage(
-            "Hero couldn't reach Supabase and is using a private local fallback for now.",
+            "Task Man couldn't reach Supabase and is using a private local fallback for now.",
           );
         }
       }
@@ -622,7 +621,7 @@ export function useHeroApp() {
         nextDueAt = parsedCapture.dueAt;
       } else {
         const parsed = normalizeParsedDate(draft.dueInput);
-        if (!parsed) return { ok: false, message: "Hero could not interpret that reminder time." };
+        if (!parsed) return { ok: false, message: "Task Man could not interpret that reminder time." };
         nextDueAt = parsed.toISOString();
       }
 
@@ -882,7 +881,7 @@ export function useHeroApp() {
       const target = items.find((item) => item.id === itemId);
       const parsed = normalizeParsedDate(dueInput);
       if (!target || !parsed) {
-        return { ok: false, message: "Hero needs both a smaller step and a valid reminder time." };
+        return { ok: false, message: "Task Man needs both a smaller step and a valid reminder time." };
       }
       const nextTitle = smallerStep.trim() || target.title;
       const result = await updateItem(itemId, {
@@ -957,7 +956,7 @@ export function useHeroApp() {
       const target = items.find((item) => item.id === targetId);
 
       if (!source || !target) {
-        return { ok: false, message: "Hero could not find that task to move." };
+        return { ok: false, message: "Task Man could not find that task to move." };
       }
 
       if (source.id === target.id) {
@@ -1018,7 +1017,7 @@ export function useHeroApp() {
   const moveItemToProject = useCallback(
     async (itemId: string, projectId: string | undefined): Promise<MutationResult> => {
       const source = items.find((item) => item.id === itemId);
-      if (!source) return { ok: false, message: "Hero could not find that task to move." };
+      if (!source) return { ok: false, message: "Task Man could not find that task to move." };
 
       const nextProjectId = sanitizeProjectId(projectId);
       const currentProjectId =
@@ -1049,75 +1048,31 @@ export function useHeroApp() {
 
     return {
       ok: false,
-      message: "Use email and password to sign in to the hosted workspace.",
+      message: "Use an email magic link to sign in to the hosted workspace.",
     };
   }, [loadUserSnapshot]);
 
-  const signInWithPassword = useCallback(
-    async (email: string, password: string): Promise<MutationResult> => {
-      if (!supabaseConfigured) {
-        const demo = getDemoUser();
-        setUser(demo);
-        await loadUserSnapshot(demo);
-        setAuthChecked(true);
-        return { ok: true, message: "Signed into demo mode." };
-      }
+  const sendMagicLink = useCallback(
+    async (email: string): Promise<MutationResult> => {
+      if (!supabaseConfigured) return signIn();
 
       const normalizedEmail = email.trim().toLowerCase();
-      if (!normalizedEmail || !password.trim()) {
-        return { ok: false, message: "Enter both email and password." };
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        return { ok: false, message: "Enter a valid email address." };
       }
 
       try {
-        const { error } = await authSignInWithPassword(normalizedEmail, password);
+        const { error } = await authSendMagicLink(normalizedEmail, window.location.origin);
         if (error) return { ok: false, message: error.message };
-        return { ok: true, message: "Signed in." };
+        return { ok: true, message: `Check ${normalizedEmail} for your sign-in link.` };
       } catch (error) {
         return {
           ok: false,
-          message: error instanceof Error ? error.message : "Sign-in failed.",
+          message: error instanceof Error ? error.message : "Could not send the sign-in link. Please try again.",
         };
       }
     },
-    [loadUserSnapshot],
-  );
-
-  const signUpWithPassword = useCallback(
-    async (email: string, password: string): Promise<MutationResult> => {
-      if (!supabaseConfigured) {
-        const demo = getDemoUser();
-        setUser(demo);
-        await loadUserSnapshot(demo);
-        setAuthChecked(true);
-        return { ok: true, message: "Signed into demo mode." };
-      }
-
-      const normalizedEmail = email.trim().toLowerCase();
-      if (!normalizedEmail || !password.trim()) {
-        return { ok: false, message: "Enter both email and password." };
-      }
-
-      if (password.trim().length < 8) {
-        return { ok: false, message: "Use at least 8 characters for the password." };
-      }
-
-      try {
-        const { data, error } = await authSignUpWithPassword(
-          normalizedEmail,
-          password,
-          window.location.origin,
-        );
-        if (error) return { ok: false, message: error.message };
-        if (data.session) return { ok: true, message: "Account created and signed in." };
-        return { ok: true, message: "Account created. Check your email if confirmation is enabled." };
-      } catch (error) {
-        return {
-          ok: false,
-          message: error instanceof Error ? error.message : "Sign-up failed.",
-        };
-      }
-    },
-    [loadUserSnapshot],
+    [signIn],
   );
 
   const signOut = useCallback(async () => {
@@ -1196,9 +1151,8 @@ export function useHeroApp() {
     saveDraft,
     setDefaultProject,
     signIn,
-    signInWithPassword,
+    sendMagicLink,
     signOut,
-    signUpWithPassword,
     syncNow,
     toggleStar,
     undoLastAction,

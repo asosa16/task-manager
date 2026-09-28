@@ -1,6 +1,6 @@
 /*
 Design note for this file:
-- Routing should preserve the original Hero rhythm: Today first, adjacent utility views second.
+- Routing should preserve the original Task Man rhythm: Today first, adjacent utility views second.
 - Keep the shell nearly invisible so the page components carry the product character.
 */
 import { Toaster } from "@/components/ui/sonner";
