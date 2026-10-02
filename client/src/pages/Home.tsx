@@ -1362,7 +1362,8 @@ export default function Home() {
                       />
                       <button
                         type="submit"
-                        className="inline-flex min-h-10 shrink-0 items-center justify-center border border-black bg-black px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-white"
+                        className="inline-flex min-h-10 shrink-0 items-center justify-center border px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-white"
+                        style={{ backgroundColor: toneColorMap[column.tone], borderColor: toneColorMap[column.tone] }}
                       >
                         Add
                       </button>
