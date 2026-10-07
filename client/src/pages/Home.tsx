@@ -1393,7 +1393,11 @@ export default function Home() {
                       const isActiveRow = activeItemId === row.item.id;
                       const isDimmed = Boolean(activeItemId) && !isActiveRow;
                       const isBystander = focusLockId !== null && focusLockId !== row.item.id;
-                      const isPastDue = new Date(row.item.dueAt).getTime() < Date.now();
+                      const dueDate = new Date(row.item.dueAt);
+                      const isPastDue = dueDate.getTime() < Date.now();
+                      // Late but still due today reads as a warning (yellow);
+                      // anything from an earlier day stays alarm red.
+                      const isPastDueToday = isPastDue && dueDate.toDateString() === new Date().toDateString();
                       const canDrop = Boolean(sourceId) && row.item.id !== sourceId;
                       const isBeingDragged = draggedItemId === row.item.id;
                       const isGrabbed = grabbedItemId === row.item.id;
@@ -1445,7 +1449,7 @@ export default function Home() {
                                   }
                                 }}
                                 onClick={() => selectItem(row.item.id, { fromListNavigation: true })}
-                                className={`min-w-0 truncate text-left text-[11px] leading-5 ${isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
+                                className={`min-w-0 truncate text-left text-[11px] leading-5 ${isPastDueToday ? "font-semibold text-yellow-700" : isPastDue ? "font-semibold text-red-800" : "text-black/58"}`}
                               >
                                 {dueLabelForList(row.item.dueAt)}
                               </button>
