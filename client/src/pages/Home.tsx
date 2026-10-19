@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { Archive, Star, Trophy } from "lucide-react";
+import { Archive, Eye, EyeOff, Star, Trophy } from "lucide-react";
 import {
   formatDueLabel,
   parseCaptureInput,
@@ -1172,18 +1172,41 @@ export default function Home() {
                 <button type="button" onClick={() => navigate("/done")} className="hover:text-black">
                   Done
                 </button>
+                {/* A view switch, not an action: styled as an on/off toggle so it
+                    never reads as a sibling of the boxed Projects / ? buttons. */}
                 <button
                   type="button"
+                  role="switch"
+                  aria-checked={hero.showBacklog}
                   onClick={toggleShowBacklog}
-                  aria-pressed={hero.showBacklog}
-                  className={`inline-flex min-h-7 items-center justify-center gap-1.5 border px-2 text-[10px] font-semibold uppercase tracking-[0.14em] sm:text-[11px] ${
-                    hero.showBacklog ? "border-black bg-black text-white" : "border-black text-black"
+                  className={`group inline-flex min-h-7 items-center gap-2 normal-case tracking-normal ${
+                    hero.showBacklog ? "text-black" : "hover:text-black"
                   }`}
                   title={hero.showBacklog ? "Hide backlog tasks (B)" : "Show backlog tasks (B)"}
                 >
-                  <Archive className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
-                  Backlog{hero.backlogCount > 0 ? ` · ${hero.backlogCount}` : ""}
+                  {hero.showBacklog ? (
+                    <Eye className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+                  )}
+                  <span className="text-[11px] sm:text-xs">
+                    Backlog
+                    {hero.backlogCount > 0 ? <span className="ml-1 tabular-nums text-black/40">{hero.backlogCount}</span> : null}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+                      hero.showBacklog ? "bg-black" : "bg-black/15 group-hover:bg-black/25"
+                    }`}
+                  >
+                    <span
+                      className={`absolute h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                        hero.showBacklog ? "translate-x-3.5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
                 </button>
+                <span className="hidden h-5 w-px bg-black/15 sm:inline-block" aria-hidden="true" />
                 <button
                   type="button"
                   onClick={() => setShowProjects((current) => !current)}
