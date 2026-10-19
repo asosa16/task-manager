@@ -80,6 +80,15 @@ function resolveDefaultProjectId(projects: HeroProject[], preferredProjectId?: s
   return projects[0]?.id ?? null;
 }
 
+// Device-level view preference (not synced): whether backlog tasks are shown.
+// Hidden by default so the backlog never crowds the working list.
+const SHOW_BACKLOG_KEY = "hero-show-backlog";
+
+function readShowBacklog() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SHOW_BACKLOG_KEY) === "1";
+}
+
 function getHeroTimeZone() {
   if (typeof window !== "undefined") {
     const stored = window.localStorage.getItem("hero-timezone");
@@ -351,6 +360,7 @@ export function useHeroApp() {
   const [defaultProjectId, setDefaultProjectIdState] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string>("all");
   const [composerOpen, setComposerOpen] = useState(false);
+  const [showBacklog, setShowBacklogState] = useState(readShowBacklog);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [remoteReady, setRemoteReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
@@ -517,12 +527,25 @@ export function useHeroApp() {
     };
   }, [disposeSynced, loadUserSnapshot]);
 
+  const setShowBacklog = useCallback((next: boolean) => {
+    setShowBacklogState(next);
+    window.localStorage.setItem(SHOW_BACKLOG_KEY, next ? "1" : "0");
+  }, []);
+
+  const backlogCount = useMemo(
+    () => items.filter((item) => item.status === "upcoming" && item.isBacklog).length,
+    [items],
+  );
+
+  // Backlog tasks drop out of every upcoming-derived view (lists, keyboard nav,
+  // due-now, overdue count) unless the user has toggled them visible.
   const upcomingItems = useMemo(() => {
     return items
       .filter((item) => item.status === "upcoming")
+      .filter((item) => showBacklog || !item.isBacklog)
       .filter((item) => activeProjectId === "all" || item.projectId === activeProjectId)
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [activeProjectId, items]);
+  }, [activeProjectId, items, showBacklog]);
 
   const doneItems = useMemo(() => {
     return items
@@ -799,6 +822,25 @@ export function useHeroApp() {
     [items, updateItem],
   );
 
+  const toggleBacklog = useCallback(
+    async (itemId: string): Promise<MutationResult> => {
+      const target = items.find((item) => item.id === itemId);
+      if (!target) return { ok: false, message: "Item not found." };
+
+      const willBacklog = !target.isBacklog;
+      const result = await updateItem(itemId, { isBacklog: willBacklog });
+      if (!result.ok) return result;
+      setUndoState({ kind: "update", item: target });
+      if (willBacklog && !showBacklog) {
+        const nextUpcoming = upcomingItems.filter((item) => item.id !== itemId);
+        setSelectedId(nextUpcoming[0]?.id ?? null);
+        return { ok: true, message: "Moved to backlog (hidden)." };
+      }
+      return { ok: true, message: willBacklog ? "Moved to backlog." : "Moved out of backlog." };
+    },
+    [items, showBacklog, upcomingItems, updateItem],
+  );
+
   const removeItem = useCallback(
     async (itemId: string): Promise<MutationResult> => {
       const target = items.find((item) => item.id === itemId);
@@ -860,6 +902,11 @@ export function useHeroApp() {
         projectId: restored.projectId,
         isRecurringDaily: restored.isRecurringDaily,
         isStarred: restored.isStarred,
+        // Only touch is_backlog when undo actually flips it, so ordinary undos
+        // keep working against a database without the is_backlog column.
+        ...(Boolean(restored.isBacklog) !== Boolean(items.find((item) => item.id === restored.id)?.isBacklog)
+          ? { isBacklog: Boolean(restored.isBacklog) }
+          : {}),
         brokenDownFromId: restored.brokenDownFromId,
         originalTitle: restored.originalTitle,
       });
@@ -874,7 +921,7 @@ export function useHeroApp() {
         message: error instanceof Error ? error.message : "Couldn't undo.",
       };
     }
-  }, [undoState]);
+  }, [items, undoState]);
 
   const breakDownAndResnooze = useCallback(
     async (itemId: string, smallerStep: string, dueInput: string): Promise<MutationResult> => {
@@ -1112,6 +1159,7 @@ export function useHeroApp() {
   return {
     activeProjectId,
     authChecked,
+    backlogCount,
     composerOpen,
     defaultProjectId,
     doneItems,
@@ -1126,6 +1174,7 @@ export function useHeroApp() {
     selectedId,
     selectedIndex,
     selectedItem,
+    showBacklog,
     starredDoneTodayItems,
     statusMessage,
     streak,
@@ -1135,6 +1184,7 @@ export function useHeroApp() {
     user,
     setActiveProjectId,
     setComposerOpen,
+    setShowBacklog,
     setSelectedId,
     addProject,
     breakDownAndResnooze,
@@ -1154,6 +1204,7 @@ export function useHeroApp() {
     sendMagicLink,
     signOut,
     syncNow,
+    toggleBacklog,
     toggleStar,
     undoLastAction,
     updateProject,

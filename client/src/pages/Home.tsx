@@ -3,6 +3,8 @@ Design note for this file:
 - Re-center Task Man on the original extension ritual: one line in, one calm list out.
 - Keep the surface sparse and monochrome; secondary actions should stay hidden until asked for.
 - Today is the default home, while All and Analytics stay lightweight and adjacent rather than competing for attention.
+- Backlog tasks (archive icon / ⇧⌘2) are hidden everywhere by default; one header toggle (or B)
+  reveals them, and the choice is remembered per device.
 - Every project is its own container, all visible at once. Each container has its own one-line
   composer (Enter saves; a missing wake-up time defaults to five minutes from now, no second
   press). A task's project is the container it sits in — there is no project dropdown anywhere;
@@ -14,7 +16,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { Star, Trophy } from "lucide-react";
+import { Archive, Star, Trophy } from "lucide-react";
 import {
   formatDueLabel,
   parseCaptureInput,
@@ -255,6 +257,7 @@ function HelpPanel({
         <div className="flex items-center justify-between gap-3"><span>mark done</span><span className="font-semibold">⇧⌘D</span></div>
         <div className="flex items-center justify-between gap-3"><span>delete</span><span className="font-semibold">⇧⌘⌫</span></div>
         <div className="flex items-center justify-between gap-3"><span>star / unstar (max 3)</span><span className="font-semibold">⇧⌘1</span></div>
+        <div className="flex items-center justify-between gap-3"><span>move to / out of backlog</span><span className="font-semibold">⇧⌘2</span></div>
         <div className="flex items-center justify-between gap-3"><span>activate hovered task (tunnel)</span><span className="font-semibold">⇧⌘A</span></div>
         <div className="flex items-center justify-between gap-3"><span>exit active task</span><span className="font-semibold">Esc</span></div>
         <div className="flex items-center justify-between gap-3"><span>undo last action (after Esc)</span><span className="font-semibold">Z <span className="text-black/40">/ U</span></span></div>
@@ -265,6 +268,7 @@ function HelpPanel({
         <div className="text-[10px] leading-4 text-black/40">Dropping slots the task directly below the one above it, in that project. Drag with the mouse for the same effect, or drag onto a project's empty space to move it there without retiming.</div>
 
         <div className="mt-3 text-[10px] uppercase tracking-[0.16em] text-black/45">Panels</div>
+        <div className="flex items-center justify-between gap-3"><span>show / hide backlog tasks</span><span className="font-semibold">B</span></div>
         <div className="flex items-center justify-between gap-3"><span>toggle this help</span><span className="font-semibold">?</span></div>
       </div>
       <button
@@ -853,6 +857,18 @@ export default function Home() {
     }
   }
 
+  async function toggleBacklog(itemId: string) {
+    const result = await hero.toggleBacklog(itemId);
+    if (!result.ok) return toast.error(result.message);
+    showActionToast(result.message);
+  }
+
+  function toggleShowBacklog() {
+    const next = !hero.showBacklog;
+    hero.setShowBacklog(next);
+    toast(next ? "Showing backlog tasks." : "Backlog tasks hidden.", { duration: 1500 });
+  }
+
   async function toggleStar(itemId: string) {
     const result = await hero.toggleStar(itemId);
     if (!result.ok) return toast.error(result.message);
@@ -973,6 +989,13 @@ export default function Home() {
         }
         return;
       }
+      if (usesShortcutModifier && selectedRow && (event.code === "Digit2" || event.key === "2" || event.key === "@")) {
+        event.preventDefault();
+        if (!event.repeat) {
+          void toggleBacklog(selectedRow.item.id);
+        }
+        return;
+      }
 
       if (isEditingField(event.target)) return;
 
@@ -997,6 +1020,12 @@ export default function Home() {
       if (event.key === "?") {
         event.preventDefault();
         setShowHelp((current) => !current);
+        return;
+      }
+
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        toggleShowBacklog();
         return;
       }
 
@@ -1142,6 +1171,18 @@ export default function Home() {
                 </button>
                 <button type="button" onClick={() => navigate("/done")} className="hover:text-black">
                   Done
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleShowBacklog}
+                  aria-pressed={hero.showBacklog}
+                  className={`inline-flex min-h-7 items-center justify-center gap-1.5 border px-2 text-[10px] font-semibold uppercase tracking-[0.14em] sm:text-[11px] ${
+                    hero.showBacklog ? "border-black bg-black text-white" : "border-black text-black"
+                  }`}
+                  title={hero.showBacklog ? "Hide backlog tasks (B)" : "Show backlog tasks (B)"}
+                >
+                  <Archive className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+                  Backlog{hero.backlogCount > 0 ? ` · ${hero.backlogCount}` : ""}
                 </button>
                 <button
                   type="button"
@@ -1413,6 +1454,7 @@ export default function Home() {
                         isBystander ? "hero-row-bystander" : "",
                         isBeingDragged || isGrabbed ? "hero-row-dragging" : "",
                         isDropTarget ? "hero-row-drop-target" : "",
+                        row.item.isBacklog ? "opacity-60" : "",
                       ].filter(Boolean).join(" ");
 
                       return (
@@ -1455,6 +1497,21 @@ export default function Home() {
                               </button>
 
                               <div className={`flex shrink-0 items-center justify-end gap-1 transition-opacity ${actionsDimmed ? "pointer-events-none opacity-30" : ""}`} aria-hidden={actionsDimmed || undefined}>
+                                <button
+                                  type="button"
+                                  disabled={actionsDimmed}
+                                  onClick={() => void toggleBacklog(row.item.id)}
+                                  aria-pressed={Boolean(row.item.isBacklog)}
+                                  className={`inline-flex h-8 w-8 items-center justify-center border transition disabled:cursor-not-allowed ${
+                                    row.item.isBacklog
+                                      ? "border-black bg-black text-white"
+                                      : "border-black/18 text-black/35 hover:border-black hover:text-black"
+                                  }`}
+                                  aria-label={row.item.isBacklog ? "Move out of backlog" : "Move to backlog"}
+                                  title={row.item.isBacklog ? "Move out of backlog (⇧⌘2)" : "Move to backlog (⇧⌘2)"}
+                                >
+                                  <Archive className="h-4 w-4" strokeWidth={1.6} />
+                                </button>
                                 <button
                                   type="button"
                                   disabled={actionsDimmed}
