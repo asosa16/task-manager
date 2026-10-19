@@ -29,6 +29,7 @@ export interface HeroItem {
   projectId?: string;
   isRecurringDaily?: boolean;
   isStarred?: boolean;
+  isBacklog?: boolean;
   brokenDownFromId?: string;
   originalTitle?: string;
 }
@@ -100,6 +101,8 @@ export interface ItemRow {
   project_id: string | null;
   is_recurring_daily: boolean;
   is_starred: boolean | null;
+  // Optional: absent until schema.sql's is_backlog column is applied.
+  is_backlog?: boolean | null;
   broken_down_from_id: string | null;
   original_title: string | null;
 }
@@ -316,6 +319,7 @@ export function mapItemRow(row: ItemRow): HeroItem {
     projectId: row.project_id ?? undefined,
     isRecurringDaily: row.is_recurring_daily,
     isStarred: row.is_starred ?? false,
+    isBacklog: row.is_backlog ?? false,
     brokenDownFromId: row.broken_down_from_id ?? undefined,
     originalTitle: row.original_title ?? undefined,
   };
@@ -350,6 +354,9 @@ export function toItemInsert(item: HeroItem, userId: string) {
     project_id: safeItem.projectId ?? null,
     is_recurring_daily: safeItem.isRecurringDaily ?? false,
     is_starred: safeItem.isStarred ?? false,
+    // Only sent when true so inserts keep working against a database that
+    // hasn't had the is_backlog column applied yet (the column defaults false).
+    ...(safeItem.isBacklog ? { is_backlog: true } : {}),
     broken_down_from_id: safeItem.brokenDownFromId ?? null,
     original_title: safeItem.originalTitle ?? null,
   };
@@ -369,6 +376,7 @@ export function toItemPatch(patch: Partial<HeroItem>) {
   if (patch.projectId !== undefined) mapped.project_id = sanitizeProjectId(patch.projectId) ?? null;
   if (patch.isRecurringDaily !== undefined) mapped.is_recurring_daily = patch.isRecurringDaily;
   if (patch.isStarred !== undefined) mapped.is_starred = patch.isStarred ?? false;
+  if (patch.isBacklog !== undefined) mapped.is_backlog = patch.isBacklog ?? false;
   if (patch.brokenDownFromId !== undefined) {
     mapped.broken_down_from_id = isUuid(patch.brokenDownFromId) ? patch.brokenDownFromId : null;
   }

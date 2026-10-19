@@ -26,11 +26,13 @@ create table if not exists public.items (
   project_id uuid references public.projects(id) on delete set null,
   is_recurring_daily boolean not null default false,
   is_starred boolean not null default false,
+  is_backlog boolean not null default false,
   broken_down_from_id uuid references public.items(id) on delete set null,
   original_title text
 );
 
 alter table public.items add column if not exists is_starred boolean not null default false;
+alter table public.items add column if not exists is_backlog boolean not null default false;
 
 create or replace function public.handle_updated_at()
 returns trigger
